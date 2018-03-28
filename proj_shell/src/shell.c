@@ -90,6 +90,7 @@ char*** parse_commands(char* string) {
 
 				// Reset arg_offsets
 				arg_offset_len = 0; 
+				arg_offset_starts = i+1;
 				parsing_state = PS_EMPTY;
 				break;
 
@@ -156,7 +157,11 @@ int main (int argc, char *argv[]) {
 	pid_t pid;
 	int status;
 
-	// TODO: implements batch mode
+	if (argc == 2) {
+		// If there are two arguemnts, run as 'batch mode'
+		// Then in this case, change 'stdin' stream to 'argv[1]'
+		freopen(argv[1], "r", stdin);
+	}
 
 	while (1) {
 		if (feof(stdin) != 0) {
@@ -173,7 +178,7 @@ int main (int argc, char *argv[]) {
 		// Parse commands from buffer
 		commands = parse_commands(buffer);
 		
-		while (command = *(commands++)) {
+		while ((command = *(commands++))) {
 			// Iterate commands and set current object to `command` var
 
 			if (strcmp(command[0], "quit") == 0) {
