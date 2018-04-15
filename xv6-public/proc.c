@@ -12,6 +12,8 @@ struct {
   struct spinlock lock;
   struct proc proc[NPROC];
   struct stridedata mlfq_stride;
+  int totalcpu;
+
   int mlfq_hpriority; // Highest prioirty on while MLFQ
   int mlfq_totaltick;
 } ptable;
@@ -33,6 +35,8 @@ pinit(void)
   acquire(&ptable.lock);
   ptable.mlfq_stride.cpushare = 20;
   ptable.mlfq_stride.stride = 100 / 20;
+  ptable.totalcpu += ptable.mlfq_stride.cpushare;
+
   release(&ptable.lock);
 }
 
@@ -661,3 +665,27 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+// Inquires to obtain cpu share (%)
+int
+set_cpu_share(int cpu_share)
+{
+  struct proc *p = myproc();
+
+  acquire(&ptable.lock);
+  
+  if(ptable.totalcpu + cpu_share > 100){
+    release(&ptable.lock);
+    return -1;
+  }
+
+  ptable.totalcpu += cpu_share;
+   
+  p->schedmode = STRIDE_MODE;
+  p->stride.cpushare = cpu_share;
+  p->stride.stride = 100 / cpu_share;
+
+  release(&ptable.lock);
+  return 0;
+}
+

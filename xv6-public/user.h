@@ -24,7 +24,10 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 int myfunction(char*); // custom
-int getppid(void);
+int getppid(void); //custom
+void yield(void);
+int getlev(void);
+int set_cpu_share(int);
 
 
 // ulib.c
