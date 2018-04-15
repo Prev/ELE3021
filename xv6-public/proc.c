@@ -12,8 +12,8 @@ struct {
   struct spinlock lock;
   struct proc proc[NPROC];
   struct stridedata mlfq_stride;
-	int mlfq_hpriority; // Highest prioirty on while MLFQ
-	int mlfq_totaltick;
+  int mlfq_hpriority; // Highest prioirty on while MLFQ
+  int mlfq_totaltick;
 } ptable;
 
 
@@ -30,7 +30,7 @@ pinit(void)
 {
   initlock(&ptable.lock, "ptable");
 
-	acquire(&ptable.lock);
+  acquire(&ptable.lock);
   ptable.mlfq_stride.cpushare = 20;
   ptable.mlfq_stride.stride = 100 / 20;
   release(&ptable.lock);
@@ -325,100 +325,100 @@ void
 mlfq_scheduler(void)
 {
   struct proc *p;
-	struct cpu *c = mycpu();
-	c->proc = 0;
+  struct cpu *c = mycpu();
+  c->proc = 0;
   
-	// Maximum level is 2.
+  // Maximum level is 2.
   enum mlfqlv cur_mlfqlv = MLFQ_2;
-	int minpri = 1000000;
-	
-	// Run priority boosting if totaltick equals `MLFQ_BOOSTING_FREQUENCY`
-	if (ptable.mlfq_totaltick == MLFQ_BOOSTING_FREQUENCY){
-		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+  int minpri = 1000000;
+  
+  // Run priority boosting if totaltick equals `MLFQ_BOOSTING_FREQUENCY`
+  if (ptable.mlfq_totaltick == MLFQ_BOOSTING_FREQUENCY){
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
-				continue;
+        continue;
 
-			p->mlfqlv = MLFQ_0;
-		  p->mlfqpri = 0;
-			p->ticknum = 0;
-		}
-		ptable.mlfq_hpriority = 0;
-		ptable.mlfq_totaltick = 0;
-	}
+      p->mlfqlv = MLFQ_0;
+      p->mlfqpri = 0;
+      p->ticknum = 0;
+    }
+    ptable.mlfq_hpriority = 0;
+    ptable.mlfq_totaltick = 0;
+  }
 
-	// For saving process to run
-	struct proc *sp = 0;
+  // For saving process to run
+  struct proc *sp = 0;
 
-	// Choose process by RR
-	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-	  if(p->state != RUNNABLE || p->schedmode != MLFQ_MODE)	
-			continue;
-		
-		// Choose lowest queue (means highest priority) in all proccess
-		// To forbid choosing multiple process,
-		// run process that has `mininum priority` among same level
-	  if(p->mlfqlv < cur_mlfqlv){
-			cur_mlfqlv = p->mlfqlv;
-		  minpri = p->mlfqpri;
-			sp = p;
-		
-		}else if(p->mlfqlv == cur_mlfqlv && p->mlfqpri < minpri){
-			minpri = p->mlfqpri;
-			sp = p;
-		}
-	}
-	
-	// If there a process to run
+  // Choose process by RR
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state != RUNNABLE || p->schedmode != MLFQ_MODE)  
+      continue;
+    
+    // Choose lowest queue (means highest priority) in all proccess
+    // To forbid choosing multiple process,
+    // run process that has `mininum priority` among same level
+    if(p->mlfqlv < cur_mlfqlv){
+      cur_mlfqlv = p->mlfqlv;
+      minpri = p->mlfqpri;
+      sp = p;
+    
+    }else if(p->mlfqlv == cur_mlfqlv && p->mlfqpri < minpri){
+      minpri = p->mlfqpri;
+      sp = p;
+    }
+  }
+  
+  // If there a process to run
   if((p = sp)) {
     c->proc = p;
-		switchuvm(p);
-		p->state = RUNNING;
+    switchuvm(p);
+    p->state = RUNNING;
 
-		swtch(&(c->scheduler), p->context);
-		switchkvm();
-			
-		// Increase ticknum of process and totaltick of MLFQ
-		p->ticknum++;
-		ptable.mlfq_totaltick++;
+    swtch(&(c->scheduler), p->context);
+    switchkvm();
+      
+    // Increase ticknum of process and totaltick of MLFQ
+    p->ticknum++;
+    ptable.mlfq_totaltick++;
 
-		c->proc = 0;
-			
-		// If ticknum of process exceeds allotment,
-		// reduce it's priority (downgrade level)
-		// Else if ticknum is greater than quantum,
-		// set mlfqpri to highest-value to move backward in current level
-		// (similar logic to push_back() of queue ADT)
-		switch(p->mlfqlv) {
-			case MLFQ_0 :
-				if(p->ticknum > MLFQ_0_ALLOTMENT){
-					p->mlfqlv++;
-				  p->ticknum = 0;
-				}else if (p->ticknum > MLFQ_0_QUANTUM){
-					 p->mlfqpri = ++ptable.mlfq_hpriority;
-				}
-				break;
+    c->proc = 0;
+      
+    // If ticknum of process exceeds allotment,
+    // reduce it's priority (downgrade level)
+    // Else if ticknum is greater than quantum,
+    // set mlfqpri to highest-value to move backward in current level
+    // (similar logic to push_back() of queue ADT)
+    switch(p->mlfqlv) {
+      case MLFQ_0 :
+        if(p->ticknum > MLFQ_0_ALLOTMENT){
+          p->mlfqlv++;
+          p->ticknum = 0;
+        }else if (p->ticknum > MLFQ_0_QUANTUM){
+           p->mlfqpri = ++ptable.mlfq_hpriority;
+        }
+        break;
 
-			case MLFQ_1 :
-				if(p->ticknum > MLFQ_1_ALLOTMENT){
-					p->mlfqlv++;
-				  p->ticknum = 0;
-				}else if (p->ticknum > MLFQ_1_QUANTUM){
-					p->mlfqpri = ++ptable.mlfq_hpriority;
-				}
-				break;
+      case MLFQ_1 :
+        if(p->ticknum > MLFQ_1_ALLOTMENT){
+          p->mlfqlv++;
+          p->ticknum = 0;
+        }else if (p->ticknum > MLFQ_1_QUANTUM){
+          p->mlfqpri = ++ptable.mlfq_hpriority;
+        }
+        break;
 
-		  case MLFQ_2 :
-				if (p->ticknum > MLFQ_2_QUANTUM){
-					p->mlfqpri = ++ptable.mlfq_hpriority;
-				}
-				break;
-		}
-			
-		// Increase pass of whole mlfq,
-		// then go back to schedule function,
-		// and compare stride again
-		ptable.mlfq_stride.pass += ptable.mlfq_stride.stride;
-	}
+      case MLFQ_2 :
+        if (p->ticknum > MLFQ_2_QUANTUM){
+          p->mlfqpri = ++ptable.mlfq_hpriority;
+        }
+        break;
+    }
+      
+    // Increase pass of whole mlfq,
+    // then go back to schedule function,
+    // and compare stride again
+    ptable.mlfq_stride.pass += ptable.mlfq_stride.stride;
+  }
 }
 
 //PAGEBREAK: 42
@@ -444,42 +444,42 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-	
-		int minpass = ptable.mlfq_stride.pass;
-		// Find minpass of all process usin stride
-		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    	  if(p->state == RUNNABLE && p->schedmode == STRIDE_MODE && p->stride.pass < minpass)
-        	minpass = p->stride.pass;
-		}
-		
-		// Run MLFQ scheduler if minpass equals mlfq's pass.
-		// Else, run other process that runs in stride mode
-		// and has lowest pass (minpass)
-		if(ptable.mlfq_stride.pass == minpass) {
-			mlfq_scheduler();
+  
+    int minpass = ptable.mlfq_stride.pass;
+    // Find minpass of all process usin stride
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->state == RUNNABLE && p->schedmode == STRIDE_MODE && p->stride.pass < minpass)
+          minpass = p->stride.pass;
+    }
+    
+    // Run MLFQ scheduler if minpass equals mlfq's pass.
+    // Else, run other process that runs in stride mode
+    // and has lowest pass (minpass)
+    if(ptable.mlfq_stride.pass == minpass) {
+      mlfq_scheduler();
 
-		}else {
-			for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-				if(p->state != RUNNABLE || p->schedmode != STRIDE_MODE)
-					continue;
-			
-				// Switch to chosen process.  It is the process's job
-				// to release ptable.lock and then reacquire it
-				// before jumping back to us.
-				if(p->stride.pass == minpass) {
-					c->proc = p;
-					switchuvm(p);
-					p->state = RUNNING;
+    }else {
+      for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->state != RUNNABLE || p->schedmode != STRIDE_MODE)
+          continue;
+      
+        // Switch to chosen process.  It is the process's job
+        // to release ptable.lock and then reacquire it
+        // before jumping back to us.
+        if(p->stride.pass == minpass) {
+          c->proc = p;
+          switchuvm(p);
+          p->state = RUNNING;
 
-					swtch(&(c->scheduler), p->context);
-					switchkvm();
-			
-					p->stride.pass += p->stride.stride;
-					c->proc = 0;
-				}
-			}
-		}
-	
+          swtch(&(c->scheduler), p->context);
+          switchkvm();
+      
+          p->stride.pass += p->stride.stride;
+          c->proc = 0;
+        }
+      }
+    }
+  
     release(&ptable.lock);
   }
 }

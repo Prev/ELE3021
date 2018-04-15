@@ -76,11 +76,11 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 
-  enum schedmode schedmode;		 // Scheduling mode (Default: MLFQ)
-  enum mlfqlv mlfqlv;					 // Level of MLFQ (Default: Q0)
-	int mlfqpri;								 // Priority of process in MLFQ (Process that has lower priority will be excuted in same level)
-	int ticknum;								 // Ticknum of MLFQ to calculate quantum and allotment
-  struct stridedata stride;		 // Stride data structure to run as stride mode
+  enum schedmode schedmode;    // Scheduling mode (Default: MLFQ)
+  enum mlfqlv mlfqlv;          // Level of MLFQ (Default: Q0)
+  int mlfqpri;                 // Priority of process in MLFQ (Process that has lower priority will be excuted in same level)
+  int ticknum;                 // Ticknum of MLFQ to calculate quantum and allotment
+  struct stridedata stride;    // Stride data structure to run as stride mode
 };
 
 
