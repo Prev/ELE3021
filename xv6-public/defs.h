@@ -120,6 +120,7 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+void            voluntary_yield(void);
 int             set_cpu_share(int);
 
 // swtch.S

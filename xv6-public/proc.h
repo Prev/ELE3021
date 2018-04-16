@@ -81,6 +81,7 @@ struct proc {
   int mlfqpri;                 // Priority of process in MLFQ (Process that has lower priority will be excuted in same level)
   int ticknum;                 // Ticknum of MLFQ to calculate quantum and allotment
   struct stridedata stride;    // Stride data structure to run as stride mode
+  int isyield;
 };
 
 

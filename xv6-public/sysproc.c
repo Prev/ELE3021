@@ -93,7 +93,7 @@ sys_uptime(void)
 // Yield the cpu to the next process
 int sys_yield(void)
 {
-  yield();
+  voluntary_yield();
   return 0;
 }
 
