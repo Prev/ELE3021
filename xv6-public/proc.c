@@ -385,7 +385,6 @@ mlfq_scheduler(void)
     c->proc = p;
     switchuvm(p);
     p->state = RUNNING;
-    p->isyield = 0;
 
     swtch(&(c->scheduler), p->context);
     switchkvm();
@@ -396,16 +395,14 @@ mlfq_scheduler(void)
 
     c->proc = 0;
   
-    //cprintf("%d: %d %d %d\n", p->pid, p->isyield, p->mlfqlv, p->ticknum);
-
-    // If ticknum of process exceeds allotment and yield() is not called by process,
+    // If ticknum of process exceeds allotment,
     // reduce it's priority (downgrade level)
     // Else if ticknum is greater than quantum,
     // set mlfqpri to highest-value to move backward in current level
     // (similar logic to push_back() of queue ADT)
     switch(p->mlfqlv) {
       case MLFQ_0 :
-        if(p->ticknum > MLFQ_0_ALLOTMENT && !p->isyield){
+        if(p->ticknum > MLFQ_0_ALLOTMENT){
           p->mlfqlv++;
           p->ticknum = 0;
         }else if (p->ticknum > MLFQ_0_QUANTUM){
@@ -414,7 +411,7 @@ mlfq_scheduler(void)
         break;
 
       case MLFQ_1 :
-        if(p->ticknum > MLFQ_1_ALLOTMENT && !p->isyield){
+        if(p->ticknum > MLFQ_1_ALLOTMENT){
           p->mlfqlv++;
           p->ticknum = 0;
         }else if (p->ticknum > MLFQ_1_QUANTUM){
@@ -496,8 +493,6 @@ scheduler(void)
       
       p->stride.pass += p->stride.stride;
       c->proc = 0;
-
-      //cprintf("st:%d (%d, %d, %d)\t", p->pid, (int)p->stride.pass, (int)p->stride.stride, (int)ptable.mlfq_stride.pass);
     }
     release(&ptable.lock);
   }
@@ -543,7 +538,7 @@ yield(void)
 void
 voluntary_yield(void)
 {
-  myproc()->isyield = 1;
+  //myproc()->isyield = 1;
   yield();
 }
 
