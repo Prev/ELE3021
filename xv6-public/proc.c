@@ -11,11 +11,11 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
-  struct stridedata mlfq_stride;
-  int totalcpu;
 
-  int mlfq_hpriority; // Highest prioirty on while MLFQ
-  int mlfq_totaltick;
+  struct stridedata mlfq_stride;  // MLFQ is processed like client in stride, and this struct includes information of it.
+  int totalcpu;                   // Total percentage of CPU (0~100)
+  int mlfq_hpriority;             // Highest prioirty on MLFQ to implement queues
+  int mlfq_totaltick;             // Total ticknum of MLFQ to exec priority boostring
 } ptable;
 
 
@@ -341,7 +341,7 @@ mlfq_scheduler(void)
   c->proc = 0;
   
   // Maximum level is 2.
-  enum mlfqlv cur_mlfqlv = MLFQ_2;
+  enum mlfqlev cur_mlfqlev = MLFQ_2;
   int minpri = 1000000;
   
   // Run priority boosting if totaltick equals `MLFQ_BOOSTING_FREQUENCY`
@@ -350,9 +350,9 @@ mlfq_scheduler(void)
       if(p->state != RUNNABLE)
         continue;
 
-      p->mlfqlv = MLFQ_0;
-      p->mlfqpri = 0;
-      p->ticknum = 0;
+      p->mlfq.lev = MLFQ_0;
+      p->mlfq.priority = 0;
+      p->mlfq.ticknum = 0;
     }
     ptable.mlfq_hpriority = 0;
     ptable.mlfq_totaltick = 0;
@@ -369,13 +369,13 @@ mlfq_scheduler(void)
     // Choose lowest queue (means highest priority) in all proccess
     // To forbid choosing multiple process,
     // run process that has `mininum priority` among same level
-    if(p->mlfqlv < cur_mlfqlv){
-      cur_mlfqlv = p->mlfqlv;
-      minpri = p->mlfqpri;
+    if(p->mlfq.lev < cur_mlfqlev){
+      cur_mlfqlev = p->mlfq.lev;
+      minpri = p->mlfq.priority;
       sp = p;
     
-    }else if(p->mlfqlv == cur_mlfqlv && p->mlfqpri < minpri){
-      minpri = p->mlfqpri;
+    }else if(p->mlfq.lev == cur_mlfqlev && p->mlfq.priority < minpri){
+      minpri = p->mlfq.priority;
       sp = p;
     }
   }
@@ -390,7 +390,7 @@ mlfq_scheduler(void)
     switchkvm();
       
     // Increase ticknum of process and totaltick of MLFQ
-    p->ticknum++;
+    p->mlfq.ticknum++;
     ptable.mlfq_totaltick++;
 
     c->proc = 0;
@@ -398,30 +398,30 @@ mlfq_scheduler(void)
     // If ticknum of process exceeds allotment,
     // reduce it's priority (downgrade level)
     // Else if ticknum is greater than quantum,
-    // set mlfqpri to highest-value to move backward in current level
+    // set mlfq.priority to highest-value to move backward in current level
     // (similar logic to push_back() of queue ADT)
-    switch(p->mlfqlv) {
+    switch(p->mlfq.lev) {
       case MLFQ_0 :
-        if(p->ticknum > MLFQ_0_ALLOTMENT){
-          p->mlfqlv++;
-          p->ticknum = 0;
-        }else if (p->ticknum > MLFQ_0_QUANTUM){
-           p->mlfqpri = ++ptable.mlfq_hpriority;
+        if(p->mlfq.ticknum > MLFQ_0_ALLOTMENT){
+          p->mlfq.lev++;
+          p->mlfq.ticknum = 0;
+        }else if (p->mlfq.ticknum > MLFQ_0_QUANTUM){
+           p->mlfq.priority = ++ptable.mlfq_hpriority;
         }
         break;
 
       case MLFQ_1 :
-        if(p->ticknum > MLFQ_1_ALLOTMENT){
-          p->mlfqlv++;
-          p->ticknum = 0;
-        }else if (p->ticknum > MLFQ_1_QUANTUM){
-          p->mlfqpri = ++ptable.mlfq_hpriority;
+        if(p->mlfq.ticknum > MLFQ_1_ALLOTMENT){
+          p->mlfq.lev++;
+          p->mlfq.ticknum = 0;
+        }else if (p->mlfq.ticknum > MLFQ_1_QUANTUM){
+          p->mlfq.priority = ++ptable.mlfq_hpriority;
         }
         break;
 
       case MLFQ_2 :
-        if (p->ticknum > MLFQ_2_QUANTUM){
-          p->mlfqpri = ++ptable.mlfq_hpriority;
+        if (p->mlfq.ticknum > MLFQ_2_QUANTUM){
+          p->mlfq.priority = ++ptable.mlfq_hpriority;
         }
         break;
     }

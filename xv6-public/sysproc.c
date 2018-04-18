@@ -102,7 +102,7 @@ int sys_yield(void)
 // Returns one of the level of MLFQ (0/1/2)
 int sys_getlev(void)
 {
-  return myproc()->mlfqlv;
+  return myproc()->mlfq.lev;
 }
 
 // Inquires to obtain cpu share (%)

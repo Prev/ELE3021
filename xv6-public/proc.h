@@ -39,7 +39,7 @@ enum schedmode { MLFQ_MODE, STRIDE_MODE };
 //enum schedmode { STRIDE_MODE, MLFQ_MODE };
 
 // Priority of process when using MLFQ scheduling
-enum mlfqlv { MLFQ_0, MLFQ_1, MLFQ_2 };
+enum mlfqlev { MLFQ_0, MLFQ_1, MLFQ_2 };
 
 // Time unit of Round Robin of each level of queue in MLFQ
 #define MLFQ_0_QUANTUM 1
@@ -53,11 +53,18 @@ enum mlfqlv { MLFQ_0, MLFQ_1, MLFQ_2 };
 // Boost all process on mlfq with this frequency
 #define MLFQ_BOOSTING_FREQUENCY 100
 
+// Data of `proc` when using MLFQ scheduling
+struct mlfqdata {
+  enum mlfqlev lev;          // Level of MLFQ (Default: Q0)
+  int priority;              // Priority of process in MLFQ (Process that has lower priority will be excuted in same level)
+  int ticknum;               // Ticknum of MLFQ to calculate quantum and allotment
+};
+
 // Data of process when using Stride scheduling
 struct stridedata {
-  double pass;
-  double stride;
-  int cpushare;
+  double pass;               // Pass of stride algorithm
+  double stride;             // Stride of stride algorithm
+  int cpushare;              // Allocated percentate of cpu (set by cpu_share function)
 };
 
 // Per-process state
@@ -77,11 +84,9 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   enum schedmode schedmode;    // Scheduling mode (Default: MLFQ)
-  enum mlfqlv mlfqlv;          // Level of MLFQ (Default: Q0)
-  int mlfqpri;                 // Priority of process in MLFQ (Process that has lower priority will be excuted in same level)
-  int ticknum;                 // Ticknum of MLFQ to calculate quantum and allotment
+  struct mlfqdata mlfq;        // MLFQ data structure to run as MLFQ mode
   struct stridedata stride;    // Stride data structure to run as stride mode
-  int isyield;
+  int isyield;                 // When process call `yield()` to give up it's CPU, is variable set to 1
 };
 
 
