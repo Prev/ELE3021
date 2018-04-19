@@ -12,21 +12,15 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
-
-//  struct stridedata mlfq_stride;  // MLFQ is processed like client in stride, and this struct includes information of it.
-//  int totalcpu;                   // Total percentage of CPU (0~100)
-//  int mlfq_hpriority;             // Highest prioirty on MLFQ to implement queues
-//  int mlfq_totaltick;             // Total ticknum of MLFQ to exec priority boostring
 } ptable;
 
 struct {
-//  struct spinlock lock;
-  
   struct stridedata stride;  // MLFQ is processed like client in stride, and this struct includes information of it.
   int totalcpu;              // Total percentage of CPU (0~100)
   int hpriority;             // Highest prioirty on MLFQ to implement queues
   int totaltick;             // Total ticknum of MLFQ to exec priority boostring
 } mlfqs;
+
 
 static struct proc *initproc;
 
@@ -40,14 +34,10 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
-//  initlock(&mlfqs.lock, "mlfqs");
 
-//  acquire(&mlfqs.lock);
   mlfqs.stride.cpushare = MLFQ_MIN_PORTION;
   mlfqs.stride.stride = 100 / MLFQ_MIN_PORTION;
   mlfqs.totalcpu += MLFQ_MIN_PORTION;
-  
-//  release(&mlfqs.lock);
 }
 
 // Must be called with interrupts disabled
@@ -272,7 +262,6 @@ exit(void)
   curproc->cwd = 0;
 
   acquire(&ptable.lock);
-//  acquire(&mlfqs.lock);
 
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
@@ -297,8 +286,6 @@ exit(void)
     curproc->mlfq.priority = 0;
     curproc->mlfq.ticknum = 0;
   }
-
-//  release(&mlfqs.lock);
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -484,13 +471,12 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-//    acquire(&mlfqs.lock);
   
     sp = 0; // Selected proc
     double minpass = mlfqs.stride.pass;
     int procnum = 0;
 
-    // Find minpass of all process usin stride
+    // Find minpass of all process using stride
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
@@ -501,7 +487,8 @@ scheduler(void)
         sp = p;
       }
     }
-
+    
+    // If "sp == 0", it means selected client is MLFQ scheduler
     // Else, run other process that runs in stride mode
     // and has lowest pass (minpass)
     if(sp == 0) {
@@ -526,7 +513,6 @@ scheduler(void)
       c->proc = 0;
     }
 
-//    release(&mlfqs.lock);
     release(&ptable.lock);
   }
 }
@@ -724,7 +710,6 @@ set_cpu_share(int cpu_share)
   struct proc *p = myproc();
 
   acquire(&ptable.lock);
-// acquire(&mlfqs.lock);
 
   if(mlfqs.totalcpu + cpu_share > 100){
     release(&ptable.lock);
@@ -737,7 +722,7 @@ set_cpu_share(int cpu_share)
   p->stride.cpushare = cpu_share;
   p->stride.stride = 100 / cpu_share;
   
-  // Reset pass to all process using stride
+  // Reset `pass` of all process using stride
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state != RUNNABLE || p->schedmode != STRIDE_MODE)
       continue;
@@ -745,7 +730,6 @@ set_cpu_share(int cpu_share)
   }
   mlfqs.stride.pass = 0;
 
-//  release(&mlfqs.lock);
   release(&ptable.lock);
   return 0;
 }
