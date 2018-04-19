@@ -281,6 +281,10 @@ exit(void)
     curproc->stride.cpushare = 0;
     curproc->stride.pass = 0;
     curproc->stride.stride = 0;
+  }else if (curproc->schedmode == MLFQ_MODE){
+    curproc->mlfq.lev = 0;
+    curproc->mlfq.priority = 0;
+    curproc->mlfq.ticknum = 0;
   }
 
   // Jump into the scheduler, never to return.
@@ -340,10 +344,6 @@ mlfq_scheduler(void)
   struct cpu *c = mycpu();
   c->proc = 0;
   
-  // Maximum level is 2.
-  enum mlfqlev cur_mlfqlev = MLFQ_2;
-  int minpri = 1000000;
-  
   // Run priority boosting if totaltick equals `MLFQ_BOOSTING_FREQUENCY`
   if (ptable.mlfq_totaltick == MLFQ_BOOSTING_FREQUENCY){
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
@@ -357,6 +357,10 @@ mlfq_scheduler(void)
     ptable.mlfq_hpriority = 0;
     ptable.mlfq_totaltick = 0;
   }
+
+  // Maximum level is 2.
+  enum mlfqlev cur_mlfqlev = MLFQ_2;
+  int minpri = 1000000;
 
   // For saving process to run
   struct proc *sp = 0;
@@ -385,15 +389,28 @@ mlfq_scheduler(void)
     c->proc = p;
     switchuvm(p);
     p->state = RUNNING;
+    p->isyield = 0;
+ 
+    /*acquire(&tickslock);
+    int starttime = ticks;
+    release(&tickslock);*/
 
     swtch(&(c->scheduler), p->context);
     switchkvm();
-      
+  
+    /*acquire(&tickslock);
+    int endtime = ticks;
+    release(&tickslock);*/
+
+    //cprintf("%s[%d] : %d / %d\n", p->name, p->pid, starttime, endtime);
+
     // Increase ticknum of process and totaltick of MLFQ
     p->mlfq.ticknum++;
     ptable.mlfq_totaltick++;
 
     c->proc = 0;
+
+    //cprintf("%d %s: %d %d\n", p->pid, p->name, p->mlfq.lev, (int)p->mlfq.ticknum);
   
     // If ticknum of process exceeds allotment,
     // reduce it's priority (downgrade level)
@@ -402,25 +419,25 @@ mlfq_scheduler(void)
     // (similar logic to push_back() of queue ADT)
     switch(p->mlfq.lev) {
       case MLFQ_0 :
-        if(p->mlfq.ticknum > MLFQ_0_ALLOTMENT){
+        if(p->mlfq.ticknum >= MLFQ_0_ALLOTMENT){
           p->mlfq.lev++;
           p->mlfq.ticknum = 0;
-        }else if (p->mlfq.ticknum > MLFQ_0_QUANTUM){
+        }else if (p->mlfq.ticknum % MLFQ_0_QUANTUM == 0){
            p->mlfq.priority = ++ptable.mlfq_hpriority;
         }
         break;
 
       case MLFQ_1 :
-        if(p->mlfq.ticknum > MLFQ_1_ALLOTMENT){
+        if(p->mlfq.ticknum >= MLFQ_1_ALLOTMENT){
           p->mlfq.lev++;
           p->mlfq.ticknum = 0;
-        }else if (p->mlfq.ticknum > MLFQ_1_QUANTUM){
+        }else if (p->mlfq.ticknum % MLFQ_1_QUANTUM == 0){
           p->mlfq.priority = ++ptable.mlfq_hpriority;
         }
         break;
 
       case MLFQ_2 :
-        if (p->mlfq.ticknum > MLFQ_2_QUANTUM){
+        if (p->mlfq.ticknum >= MLFQ_2_QUANTUM){
           p->mlfq.priority = ++ptable.mlfq_hpriority;
         }
         break;
@@ -538,7 +555,7 @@ yield(void)
 void
 voluntary_yield(void)
 {
-  //myproc()->isyield = 1;
+  myproc()->isyield = 1;
   yield();
 }
 
