@@ -7,17 +7,26 @@
 #include "proc.h"
 #include "spinlock.h"
 
+#define MLFQ_MIN_PORTION 20
 
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
 
-  struct stridedata mlfq_stride;  // MLFQ is processed like client in stride, and this struct includes information of it.
-  int totalcpu;                   // Total percentage of CPU (0~100)
-  int mlfq_hpriority;             // Highest prioirty on MLFQ to implement queues
-  int mlfq_totaltick;             // Total ticknum of MLFQ to exec priority boostring
+//  struct stridedata mlfq_stride;  // MLFQ is processed like client in stride, and this struct includes information of it.
+//  int totalcpu;                   // Total percentage of CPU (0~100)
+//  int mlfq_hpriority;             // Highest prioirty on MLFQ to implement queues
+//  int mlfq_totaltick;             // Total ticknum of MLFQ to exec priority boostring
 } ptable;
 
+struct {
+//  struct spinlock lock;
+  
+  struct stridedata stride;  // MLFQ is processed like client in stride, and this struct includes information of it.
+  int totalcpu;              // Total percentage of CPU (0~100)
+  int hpriority;             // Highest prioirty on MLFQ to implement queues
+  int totaltick;             // Total ticknum of MLFQ to exec priority boostring
+} mlfqs;
 
 static struct proc *initproc;
 
@@ -31,13 +40,14 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
+//  initlock(&mlfqs.lock, "mlfqs");
 
-  acquire(&ptable.lock);
-  ptable.mlfq_stride.cpushare = 20;
-  ptable.mlfq_stride.stride = 100 / 20;
-  ptable.totalcpu += ptable.mlfq_stride.cpushare;
+//  acquire(&mlfqs.lock);
+  mlfqs.stride.cpushare = MLFQ_MIN_PORTION;
+  mlfqs.stride.stride = 100 / MLFQ_MIN_PORTION;
+  mlfqs.totalcpu += MLFQ_MIN_PORTION;
   
-  release(&ptable.lock);
+//  release(&mlfqs.lock);
 }
 
 // Must be called with interrupts disabled
@@ -262,6 +272,7 @@ exit(void)
   curproc->cwd = 0;
 
   acquire(&ptable.lock);
+//  acquire(&mlfqs.lock);
 
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
@@ -277,7 +288,7 @@ exit(void)
 
   // Reset data of stride on exit
   if(curproc->schedmode == STRIDE_MODE){
-    ptable.totalcpu -= curproc->stride.cpushare;
+    mlfqs.totalcpu -= curproc->stride.cpushare;
     curproc->stride.cpushare = 0;
     curproc->stride.pass = 0;
     curproc->stride.stride = 0;
@@ -286,6 +297,8 @@ exit(void)
     curproc->mlfq.priority = 0;
     curproc->mlfq.ticknum = 0;
   }
+
+//  release(&mlfqs.lock);
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -345,7 +358,7 @@ mlfq_scheduler(void)
   c->proc = 0;
   
   // Run priority boosting if totaltick equals `MLFQ_BOOSTING_FREQUENCY`
-  if (ptable.mlfq_totaltick == MLFQ_BOOSTING_FREQUENCY){
+  if (mlfqs.totaltick == MLFQ_BOOSTING_FREQUENCY){
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
@@ -354,8 +367,8 @@ mlfq_scheduler(void)
       p->mlfq.priority = 0;
       p->mlfq.ticknum = 0;
     }
-    ptable.mlfq_hpriority = 0;
-    ptable.mlfq_totaltick = 0;
+    mlfqs.hpriority = 0;
+    mlfqs.totaltick = 0;
   }
 
   // Maximum level is 2.
@@ -406,7 +419,7 @@ mlfq_scheduler(void)
 
     // Increase ticknum of process and totaltick of MLFQ
     p->mlfq.ticknum++;
-    ptable.mlfq_totaltick++;
+    mlfqs.totaltick++;
 
     c->proc = 0;
 
@@ -423,7 +436,7 @@ mlfq_scheduler(void)
           p->mlfq.lev++;
           p->mlfq.ticknum = 0;
         }else if (p->mlfq.ticknum % MLFQ_0_QUANTUM == 0){
-           p->mlfq.priority = ++ptable.mlfq_hpriority;
+           p->mlfq.priority = ++mlfqs.hpriority;
         }
         break;
 
@@ -432,13 +445,13 @@ mlfq_scheduler(void)
           p->mlfq.lev++;
           p->mlfq.ticknum = 0;
         }else if (p->mlfq.ticknum % MLFQ_1_QUANTUM == 0){
-          p->mlfq.priority = ++ptable.mlfq_hpriority;
+          p->mlfq.priority = ++mlfqs.hpriority;
         }
         break;
 
       case MLFQ_2 :
         if (p->mlfq.ticknum >= MLFQ_2_QUANTUM){
-          p->mlfq.priority = ++ptable.mlfq_hpriority;
+          p->mlfq.priority = ++mlfqs.hpriority;
         }
         break;
     }
@@ -446,7 +459,7 @@ mlfq_scheduler(void)
   // Increase pass of whole mlfq,
   // then go back to schedule function,
   // and compare stride again
-  ptable.mlfq_stride.pass += ptable.mlfq_stride.stride;
+  mlfqs.stride.pass += mlfqs.stride.stride;
 }
 
 //PAGEBREAK: 42
@@ -471,9 +484,10 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+//    acquire(&mlfqs.lock);
   
     sp = 0; // Selected proc
-    double minpass = ptable.mlfq_stride.pass;
+    double minpass = mlfqs.stride.pass;
     int procnum = 0;
 
     // Find minpass of all process usin stride
@@ -495,7 +509,7 @@ scheduler(void)
 
       // If there is no process, reset pass of whole MLFQ to 0
       if(procnum == 0)
-        ptable.mlfq_stride.pass = 0;
+        mlfqs.stride.pass = 0;
 
     }else if((p=sp)){
       // Switch to chosen process.  It is the process's job
@@ -511,6 +525,8 @@ scheduler(void)
       p->stride.pass += p->stride.stride;
       c->proc = 0;
     }
+
+//    release(&mlfqs.lock);
     release(&ptable.lock);
   }
 }
@@ -708,13 +724,14 @@ set_cpu_share(int cpu_share)
   struct proc *p = myproc();
 
   acquire(&ptable.lock);
-  
-  if(ptable.totalcpu + cpu_share > 100){
+// acquire(&mlfqs.lock);
+
+  if(mlfqs.totalcpu + cpu_share > 100){
     release(&ptable.lock);
     return -1;
   }
 
-  ptable.totalcpu += cpu_share;
+  mlfqs.totalcpu += cpu_share;
    
   p->schedmode = STRIDE_MODE;
   p->stride.cpushare = cpu_share;
@@ -726,8 +743,9 @@ set_cpu_share(int cpu_share)
       continue;
     p->stride.pass = 0;
   }
-  ptable.mlfq_stride.pass = 0;
+  mlfqs.stride.pass = 0;
 
+//  release(&mlfqs.lock);
   release(&ptable.lock);
   return 0;
 }
