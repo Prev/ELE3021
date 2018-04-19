@@ -89,3 +89,29 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// Yield the cpu to the next process
+int sys_yield(void)
+{
+  voluntary_yield();
+  return 0;
+}
+
+// Get the level of current process
+// ready queue of MLFQ.
+// Returns one of the level of MLFQ (0/1/2)
+int sys_getlev(void)
+{
+  return myproc()->mlfq.lev;
+}
+
+// Inquires to obtain cpu share (%)
+int sys_set_cpu_share(void)
+{
+  int cpu_share;
+
+  if(argint(0, &cpu_share) < 0)
+    return -1;
+
+  return set_cpu_share(cpu_share);
+}

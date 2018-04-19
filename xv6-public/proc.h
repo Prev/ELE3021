@@ -34,6 +34,39 @@ struct context {
 
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+// Mode of scheduling per each process (MLFQ or STRIDE)
+enum schedmode { MLFQ_MODE, STRIDE_MODE };
+//enum schedmode { STRIDE_MODE, MLFQ_MODE };
+
+// Priority of process when using MLFQ scheduling
+enum mlfqlev { MLFQ_0, MLFQ_1, MLFQ_2 };
+
+// Time unit of Round Robin of each level of queue in MLFQ
+#define MLFQ_0_QUANTUM 1
+#define MLFQ_1_QUANTUM 2
+#define MLFQ_2_QUANTUM 4
+
+// If queue exceed allotment, it's level would be downgraded.
+#define MLFQ_0_ALLOTMENT 5
+#define MLFQ_1_ALLOTMENT 10
+
+// Boost all process on mlfq with this frequency
+#define MLFQ_BOOSTING_FREQUENCY 100
+
+// Data of `proc` when using MLFQ scheduling
+struct mlfqdata {
+  enum mlfqlev lev;          // Level of MLFQ (Default: Q0)
+  int priority;              // Priority of process in MLFQ (Process that has lower priority will be excuted in same level)
+  int ticknum;               // Ticknum of MLFQ to calculate quantum and allotment
+};
+
+// Data of process when using Stride scheduling
+struct stridedata {
+  double pass;               // Pass of stride algorithm
+  double stride;             // Stride of stride algorithm
+  int cpushare;              // Allocated percentate of cpu (set by cpu_share function)
+};
+
 // Per-process state
 struct proc {
   uint sz;                     // Size of process memory (bytes)
@@ -49,7 +82,13 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  enum schedmode schedmode;    // Scheduling mode (Default: MLFQ)
+  struct mlfqdata mlfq;        // MLFQ data structure to run as MLFQ mode
+  struct stridedata stride;    // Stride data structure to run as stride mode
+  int isyield;                 // When process call `yield()` to give up it's CPU, is variable set to 1
 };
+
 
 // Process memory is laid out contiguously, low addresses first:
 //   text
