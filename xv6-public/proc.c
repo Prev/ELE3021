@@ -34,10 +34,6 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
-
-  mlfqs.stride.cpushare = MLFQ_MIN_PORTION;
-  mlfqs.stride.stride = 100 / MLFQ_MIN_PORTION;
-  mlfqs.totalcpu += MLFQ_MIN_PORTION;
 }
 
 // Must be called with interrupts disabled
@@ -125,6 +121,15 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
+
+  // Init data of stride & mlfq
+  p->stride.cpushare = 0;
+  p->stride.pass = 0;
+  p->stride.stride = 0;
+  p->mlfq.lev = 0;
+  p->mlfq.priority = 0;
+  p->mlfq.ticknum = 0;
+  //p->callcnt = 0;
 
   return p;
 }
@@ -276,16 +281,11 @@ exit(void)
   }
 
   // Reset data of stride on exit
-  if(curproc->schedmode == STRIDE_MODE){
-    mlfqs.totalcpu -= curproc->stride.cpushare;
-    curproc->stride.cpushare = 0;
-    curproc->stride.pass = 0;
-    curproc->stride.stride = 0;
-  }else if (curproc->schedmode == MLFQ_MODE){
-    curproc->mlfq.lev = 0;
-    curproc->mlfq.priority = 0;
-    curproc->mlfq.ticknum = 0;
-  }
+  mlfqs.totalcpu -= curproc->stride.cpushare;
+  
+  // For debug calling cnt
+  //cprintf("[%d] %s:\t Called %d times (start: %d, end:%d, use:%d)\n", curproc->pid, curproc->name,
+  //    curproc->callcnt, curproc->starttick, ticks, ticks - curproc->starttick);
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -391,27 +391,20 @@ mlfq_scheduler(void)
     p->state = RUNNING;
     p->isyield = 0;
  
-    /*acquire(&tickslock);
-    int starttime = ticks;
-    release(&tickslock);*/
-
     swtch(&(c->scheduler), p->context);
     switchkvm();
-  
-    /*acquire(&tickslock);
-    int endtime = ticks;
-    release(&tickslock);*/
-
-    //cprintf("%s[%d] : %d / %d\n", p->name, p->pid, starttime, endtime);
 
     // Increase ticknum of process and totaltick of MLFQ
     p->mlfq.ticknum++;
     mlfqs.totaltick++;
 
     c->proc = 0;
+    
+    /*if (p->callcnt == 0)
+      p->starttick = ticks;
+    p->callcnt++;*/
 
-    //cprintf("%d %s: %d %d\n", p->pid, p->name, p->mlfq.lev, (int)p->mlfq.ticknum);
-  
+
     // If ticknum of process exceeds allotment,
     // reduce it's priority (downgrade level)
     // Else if ticknum is greater than quantum,
@@ -446,7 +439,7 @@ mlfq_scheduler(void)
   // Increase pass of whole mlfq,
   // then go back to schedule function,
   // and compare stride again
-  mlfqs.stride.pass += mlfqs.stride.stride;
+  mlfqs.stride.pass += (double)(100l / (double)(100 - mlfqs.totalcpu)); // Stride of MLFQ;
 }
 
 //PAGEBREAK: 42
@@ -511,6 +504,10 @@ scheduler(void)
       
       p->stride.pass += p->stride.stride;
       c->proc = 0;
+
+      /*if(p->callcnt == 0)
+        p->starttick = ticks;
+      p->callcnt++;*/
     }
 
     release(&ptable.lock);
@@ -711,7 +708,7 @@ set_cpu_share(int cpu_share)
 
   acquire(&ptable.lock);
 
-  if(mlfqs.totalcpu + cpu_share > 100){
+  if(mlfqs.totalcpu + cpu_share > 100 - MLFQ_MIN_PORTION){
     release(&ptable.lock);
     return -1;
   }
@@ -720,8 +717,8 @@ set_cpu_share(int cpu_share)
    
   p->schedmode = STRIDE_MODE;
   p->stride.cpushare = cpu_share;
-  p->stride.stride = 100 / cpu_share;
-  
+  p->stride.stride = 100l / (double)cpu_share;
+ 
   // Reset `pass` of all process using stride
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state != RUNNABLE || p->schedmode != STRIDE_MODE)

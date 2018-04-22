@@ -87,6 +87,9 @@ struct proc {
   struct mlfqdata mlfq;        // MLFQ data structure to run as MLFQ mode
   struct stridedata stride;    // Stride data structure to run as stride mode
   int isyield;                 // When process call `yield()` to give up it's CPU, is variable set to 1
+
+//  int callcnt;
+//  int starttick;
 };
 
 
