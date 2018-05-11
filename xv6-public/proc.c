@@ -25,6 +25,7 @@ struct {
 static struct proc *initproc;
 
 int nextpid = 1;
+int nexttid = 1;
 extern void forkret(void);
 extern void trapret(void);
 
@@ -121,16 +122,15 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
+  
+  p->schedmode = 0;
+  p->isthread = 0;
+  p->tid = 0;
+  p->master = 0;
 
   // Init data of stride & mlfq
   memset(&p->stride, 0, sizeof p->stride);
   memset(&p->mlfq, 0, sizeof p->mlfq);
-  /*p->stride.cpushare = 0;
-  p->stride.pass = 0;
-  p->stride.stride = 0;
-  p->mlfq.lev = 0;
-  p->mlfq.priority = 0;
-  p->mlfq.ticknum = 0;*/
   //p->callcnt = 0;
 
   return p;
@@ -238,8 +238,6 @@ fork(void)
   np->state = RUNNABLE;
 
   release(&ptable.lock);
-  
-  //cprintf("fork: [%d] %s: %x, %x(%d)\n", np->pid, np->name, np->pgdir, np->sz, (int)np->sz);
 
   return pid;
 }
@@ -253,8 +251,6 @@ exit(void)
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
-  
-  //cprintf("exit: [%d] %s: %x, %x(%d)\n", curproc->pid, curproc->name, curproc->pgdir, curproc->sz, (int)curproc->sz);
 
   if(curproc == initproc)
     panic("init exiting");
@@ -746,12 +742,25 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
 
   --nextpid;
   
-
+  // Set thread-dependant properties
   np->isthread = 1;
   np->master = master;
   np->pid = master->pid;
-  np->tid = ++master->threadnum;
+  np->tid = nexttid++;
 
+  // For usefulness of cleaning up on thread-terminated,
+  // scope of address (means base address) is determined by its tid.
+  pgdir = master->pgdir;
+  sz = master->sz + (uint)(10 * PGSIZE * np->tid); // Base of virtual address
+  
+  // Allocate two pages for current thread.
+  // Make the first inaccessible. Use the second as the user stack for new thread
+  if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0){
+    np->state = UNUSED;  
+    return -1;
+  }
+  clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
+  
   // Copy states
   *np->tf = *master->tf;
   np->schedmode = master->schedmode;
@@ -763,19 +772,7 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
 
   safestrcpy(np->name, master->name, sizeof(master->name));
 
-  // Allocate two pages at the next page boundary.
-  // Make the first inaccessible.  Use the second as the user stack for new thread
-  pgdir = master->pgdir;
-  sz = master->sz;
-
-  if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0)
-    goto bad;
-  clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
-  
-  master->sz = sz;
-  sp = sz;
-  
-  sp -= 4;
+  sp = sz - 4;
   *((uint*)sp) = (uint)arg; // argument
   sp -= 4;
   *((uint*)sp) = 0xffffffff; // fake return PC
@@ -785,6 +782,8 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
   np->tf->eip = (uint)start_routine; // entry point of this thread
   np->tf->esp = sp; // set stack pointer
 
+  // Return tid through argument
+  *thread = np->tid;
 
   // Make runnable
   acquire(&ptable.lock);
@@ -794,26 +793,103 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
   release(&ptable.lock);
   
   return 0;
-
-bad:
-  np->state = UNUSED;
-  return -1;
 }
 
-// Exit the thread
+// Terminate the thread
+// Return value will be passed when calling thread_join by master process
+// Similar logic to `exit()` function 
 void 
 thread_exit(void* retval)
 {
-  // TODO
-  cprintf("Currently not supported\n");
+  struct proc *curproc = myproc();
+  int fd;
+
+  // Close all open files.
+  for(fd = 0; fd < NOFILE; fd++){
+    if(curproc->ofile[fd]){
+      fileclose(curproc->ofile[fd]);
+      curproc->ofile[fd] = 0;
+    }
+  }
+
+  begin_op();
+  iput(curproc->cwd);
+  end_op();
+  curproc->cwd = 0;
+
+  acquire(&ptable.lock);
+  
+  // Save retval temporarily
+  curproc->tmp_retval = retval;
+
+  // Master process might be sleeping in wait().
+  wakeup1(curproc->master);
+
+  // Reset data of stride on exit
+  mlfqs.totalcpu -= curproc->stride.cpushare;
+
+  // Jump into the scheduler, never to return.
+  curproc->state = ZOMBIE;
+  sched();
+  panic("zombie exit");
 }
 
 
-// Join the thread
+// Wait for the thread to exit. If that thread
+// has already terminated, then returns immediately.
+// Also cleaning up the resources allocated to the thread
+// such as a page table, allocated memories and stacks.
 int
 thread_join(thread_t thread, void** retval)
 {
-  // TODO
-  cprintf("Currently not supported\n");
-  return -1;
+  struct proc *p;
+  struct proc *curproc = myproc();
+  
+  // Slave thread cannot call thread_join
+  if(curproc->master != 0){
+    return -1;
+  }
+
+  acquire(&ptable.lock);
+  for(;;){
+    // Scan through table looking for exited slave threads.
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->tid != thread)
+        continue;
+      
+      // Only master of the slave thread can call thread_join
+      if(p->master != curproc)
+        return -1;
+
+      if(p->state == ZOMBIE){
+        // Found one.
+        *retval = p->tmp_retval;
+
+        kfree(p->kstack);
+        p->kstack = 0;
+
+        p->pid = 0;
+        p->parent = 0;
+        p->master = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+        p->state = UNUSED;
+
+        // Deallocate memory area of this thread
+        deallocuvm(p->pgdir, p->sz + 2*PGSIZE, p->sz);
+
+        release(&ptable.lock);
+        return 0;
+      }
+    }
+
+    if(curproc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    // Wait for slave thread to exit.  (See wakeup1 call in proc_exit.)
+    sleep(curproc, &ptable.lock);  //DOC: wait-sleep
+  }
 }
+

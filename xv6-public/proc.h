@@ -90,12 +90,8 @@ struct proc {
 
   int isthread;                // '1' if this is pthread, 0 otherwise
   int tid;                     // Thread id
-  int threadnum;               // Number of thread if current is master
   struct proc *master;         // Master thread of this process
-  void* t_retval;              // Return value of thread
-
-//  int callcnt;
-//  int starttick;
+  void* tmp_retval;            // Temporally saved return-value of thread
 };
 
 
