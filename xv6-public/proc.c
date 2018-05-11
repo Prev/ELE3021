@@ -123,12 +123,14 @@ found:
   p->context->eip = (uint)forkret;
 
   // Init data of stride & mlfq
-  p->stride.cpushare = 0;
+  memset(&p->stride, 0, sizeof p->stride);
+  memset(&p->mlfq, 0, sizeof p->mlfq);
+  /*p->stride.cpushare = 0;
   p->stride.pass = 0;
   p->stride.stride = 0;
   p->mlfq.lev = 0;
   p->mlfq.priority = 0;
-  p->mlfq.ticknum = 0;
+  p->mlfq.ticknum = 0;*/
   //p->callcnt = 0;
 
   return p;
@@ -236,6 +238,8 @@ fork(void)
   np->state = RUNNABLE;
 
   release(&ptable.lock);
+  
+  //cprintf("fork: [%d] %s: %x, %x(%d)\n", np->pid, np->name, np->pgdir, np->sz, (int)np->sz);
 
   return pid;
 }
@@ -249,6 +253,8 @@ exit(void)
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
+  
+  //cprintf("exit: [%d] %s: %x, %x(%d)\n", curproc->pid, curproc->name, curproc->pgdir, curproc->sz, (int)curproc->sz);
 
   if(curproc == initproc)
     panic("init exiting");
@@ -400,11 +406,6 @@ mlfq_scheduler(void)
 
     c->proc = 0;
     
-    /*if (p->callcnt == 0)
-      p->starttick = ticks;
-    p->callcnt++;*/
-
-
     // If ticknum of process exceeds allotment,
     // reduce it's priority (downgrade level)
     // Else if ticknum is greater than quantum,
@@ -504,10 +505,6 @@ scheduler(void)
       
       p->stride.pass += p->stride.stride;
       c->proc = 0;
-
-      /*if(p->callcnt == 0)
-        p->starttick = ticks;
-      p->callcnt++;*/
     }
 
     release(&ptable.lock);
@@ -731,3 +728,92 @@ set_cpu_share(int cpu_share)
   return 0;
 }
 
+// Create thread on this process
+int
+thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
+{
+  int i;
+  uint sz, sp;
+  pde_t *pgdir;
+  struct proc *np;
+  struct proc *curproc = myproc();
+  struct proc *master = curproc->master ? curproc->master : curproc;
+
+  // Allocate process.
+  if((np = allocproc()) == 0){
+      return -1;
+  }
+
+  --nextpid;
+  
+
+  np->isthread = 1;
+  np->master = master;
+  np->pid = master->pid;
+  np->tid = ++master->threadnum;
+
+  // Copy states
+  *np->tf = *master->tf;
+  np->schedmode = master->schedmode;
+
+  for(i = 0; i < NOFILE; i++)
+    if(master->ofile[i])
+      np->ofile[i] = filedup(master->ofile[i]);
+  np->cwd = idup(master->cwd);
+
+  safestrcpy(np->name, master->name, sizeof(master->name));
+
+  // Allocate two pages at the next page boundary.
+  // Make the first inaccessible.  Use the second as the user stack for new thread
+  pgdir = master->pgdir;
+  sz = master->sz;
+
+  if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0)
+    goto bad;
+  clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
+  
+  master->sz = sz;
+  sp = sz;
+  
+  sp -= 4;
+  *((uint*)sp) = (uint)arg; // argument
+  sp -= 4;
+  *((uint*)sp) = 0xffffffff; // fake return PC
+
+  np->pgdir = pgdir;
+  np->sz = sz;
+  np->tf->eip = (uint)start_routine; // entry point of this thread
+  np->tf->esp = sp; // set stack pointer
+
+
+  // Make runnable
+  acquire(&ptable.lock);
+
+  np->state = RUNNABLE;
+
+  release(&ptable.lock);
+  
+  return 0;
+
+bad:
+  np->state = UNUSED;
+  return -1;
+}
+
+// Exit the thread
+void 
+thread_exit(void* retval)
+{
+  // TODO
+  cprintf("Currently not supported\n");
+}
+
+
+// Join the thread
+int
+thread_join(thread_t thread, void** retval)
+{
+  // TODO
+  cprintf("Currently not supported\n");
+  return -1;
+}
