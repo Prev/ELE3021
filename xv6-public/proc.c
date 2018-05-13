@@ -209,9 +209,28 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
+  
+  // If normal process, copy it's memory space only.
+  // On thread, copy process's memory space and thread's memory space
+  if(curproc->isthread == 1){
+    /*cprintf("Thread called fork()\n");
 
-  // Copy process state from proc.
-  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
+    cprintf("Copy from %x to %x\n", curproc->vabase, curproc->sz);
+    np->pgdir = copyuvmrange(curproc->pgdir, curproc->vabase, curproc->sz);
+
+    cprintf("Copy from 0 to %x\n", curproc->master->sz);
+    np->pgdir = copyuvm(np->pgdir, curproc->master->sz); // Copy process's memory space
+    */
+    //cprintf("Copy from %x to %x\n", curproc->vabase, curproc->sz);
+    //if(np->pgdir != 0)
+    //  np->pgdir = copyuvmrange(np->pgdir, curproc->vabase, curproc->sz); // Copy thread's memory space
+    np->pgdir = copyuvmip(curproc->pgdir, curproc->sz);
+  }else{
+    np->pgdir = copyuvm(curproc->pgdir, curproc->sz);
+  }
+
+  // Check for error
+  if(np->pgdir == 0){
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
@@ -254,19 +273,29 @@ exit(void)
 
   if(curproc == initproc)
     panic("init exiting");
+  
+  // If curproc is slave thread, operate function with master process centrally
+  if(curproc->master != 0)
+    curproc = curproc->master;
 
-  // Close all open files.
-  for(fd = 0; fd < NOFILE; fd++){
-    if(curproc->ofile[fd]){
-      fileclose(curproc->ofile[fd]);
-      curproc->ofile[fd] = 0;
+  // Close threads of current process collectively
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid != curproc->pid)
+      continue;
+
+    // Close all open files.
+    for(fd = 0; fd < NOFILE; fd++){
+      if(p->ofile[fd]){
+        fileclose(p->ofile[fd]);
+        p->ofile[fd] = 0;
+      }
     }
-  }
 
-  begin_op();
-  iput(curproc->cwd);
-  end_op();
-  curproc->cwd = 0;
+    begin_op();
+    iput(p->cwd);
+    end_op();
+    p->cwd = 0;
+  }
 
   acquire(&ptable.lock);
 
@@ -284,13 +313,15 @@ exit(void)
 
   // Reset data of stride on exit
   mlfqs.totalcpu -= curproc->stride.cpushare;
-  
-  // For debug calling cnt
-  //cprintf("[%d] %s:\t Called %d times (start: %d, end:%d, use:%d)\n", curproc->pid, curproc->name,
-  //    curproc->callcnt, curproc->starttick, ticks, ticks - curproc->starttick);
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid != curproc->pid)
+      continue;
+    p->state = ZOMBIE;
+  }
 
   // Jump into the scheduler, never to return.
-  curproc->state = ZOMBIE;
+  //curproc->state = ZOMBIE;
   sched();
   panic("zombie exit");
 }
@@ -693,6 +724,20 @@ procdump(void)
   }
 }
 
+// Reset pass of all processes using stride scheduling
+void
+reset_strides(void)
+{
+  struct proc *p;
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state != RUNNABLE || p->schedmode != STRIDE_MODE)
+      continue;
+    p->stride.pass = 0;
+  }
+  mlfqs.stride.pass = 0;
+}
+
 // Inquires to obtain cpu share (%)
 int
 set_cpu_share(int cpu_share)
@@ -712,24 +757,19 @@ set_cpu_share(int cpu_share)
   p->stride.cpushare = cpu_share;
   p->stride.stride = 100l / (double)cpu_share;
  
-  // Reset `pass` of all process using stride
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->state != RUNNABLE || p->schedmode != STRIDE_MODE)
-      continue;
-    p->stride.pass = 0;
-  }
-  mlfqs.stride.pass = 0;
+  reset_strides();
 
   release(&ptable.lock);
   return 0;
 }
+
 
 // Create thread on this process
 int
 thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
 {
   int i;
-  uint sz, sp;
+  uint sz, sp, vabase;
   pde_t *pgdir;
   struct proc *np;
   struct proc *curproc = myproc();
@@ -751,15 +791,17 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
   // For usefulness of cleaning up on thread-terminated,
   // scope of address (means base address) is determined by its tid.
   pgdir = master->pgdir;
-  sz = master->sz + (uint)(10 * PGSIZE * np->tid); // Base of virtual address
-  
+  vabase = master->sz + (uint)(10 * PGSIZE * np->tid); // Base of virtual address
+
   // Allocate two pages for current thread.
   // Make the first inaccessible. Use the second as the user stack for new thread
-  if((sz = allocuvm(pgdir, sz, sz + 2*PGSIZE)) == 0){
+  if((sz = allocuvm(pgdir, vabase, vabase + 2*PGSIZE)) == 0){
     np->state = UNUSED;  
     return -1;
   }
+
   clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
+  //vabase += PGSIZE;
   
   // Copy states
   *np->tf = *master->tf;
@@ -778,6 +820,7 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
   *((uint*)sp) = 0xffffffff; // fake return PC
 
   np->pgdir = pgdir;
+  np->vabase = vabase;
   np->sz = sz;
   np->tf->eip = (uint)start_routine; // entry point of this thread
   np->tf->esp = sp; // set stack pointer
@@ -864,7 +907,7 @@ thread_join(thread_t thread, void** retval)
       if(p->state == ZOMBIE){
         // Found one.
         *retval = p->tmp_retval;
-
+        
         kfree(p->kstack);
         p->kstack = 0;
 
@@ -876,7 +919,7 @@ thread_join(thread_t thread, void** retval)
         p->state = UNUSED;
 
         // Deallocate memory area of this thread
-        deallocuvm(p->pgdir, p->sz + 2*PGSIZE, p->sz);
+        deallocuvm(p->pgdir, p->sz, p->vabase);
 
         release(&ptable.lock);
         return 0;

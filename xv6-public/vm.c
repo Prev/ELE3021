@@ -342,6 +342,37 @@ bad:
   return 0;
 }
 
+// Copy uvm but ignore blocks that is not present rather panic
+pde_t*
+copyuvmip(pde_t *pgdir, uint sz)
+{
+  pde_t *d;
+  pte_t *pte;
+  uint pa, i, flags;
+  char *mem;
+
+  if((d = setupkvm()) == 0)
+    return 0;
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
+      panic("copyuvm: pte should exist");
+    if(!(*pte & PTE_P))
+      continue; //Ignore
+    pa = PTE_ADDR(*pte);
+    flags = PTE_FLAGS(*pte);
+    if((mem = kalloc()) == 0)
+      goto bad;
+    memmove(mem, (char*)P2V(pa), PGSIZE);
+    if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0)
+      goto bad;
+  }
+  return d;
+
+bad:
+  freevm(d);
+  return 0;
+}
+
 //PAGEBREAK!
 // Map user virtual address to kernel address.
 char*

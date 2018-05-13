@@ -92,6 +92,7 @@ struct proc {
   int tid;                     // Thread id
   struct proc *master;         // Master thread of this process
   void* tmp_retval;            // Temporally saved return-value of thread
+  uint vabase;                 // Base of virtual address (Base of normal process is 0, but slave thread has special base addr)
 };
 
 
