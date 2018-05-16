@@ -84,11 +84,51 @@ test2()
   printf(1, "[%d(%d)] Result on main thread: %d\n", getpid(), gettid(), (int)retval);
 }
 
+
+
+void*
+routine3(void *arg)
+{
+  while(1) {}
+  return (void *)-1;
+}
+
+
+void
+test3()
+{
+  /*thread_t mthread;
+  thread_create(&mthread, routine3, (void*)1000);
+  
+  sleep(10);
+
+  exit();*/
+  int pid, i=0;
+
+  pid = fork();
+
+  if(pid == 0){
+    while(i < 100) {
+      i += 1;
+      sleep(10);
+    }
+    printf(1, "fin!\n");
+    exit();
+
+  }else if(pid > 0){
+    sleep(10);
+    exit();
+  }
+}
+
+
+
+
 int
 main(int argc, char *argv[])
 {
   //test1();
-  test2();
+  test3();
   printf(1, "All tests are done\n");
   
   exit();
