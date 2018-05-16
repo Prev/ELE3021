@@ -18,7 +18,15 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pde_t *pgdir, *oldpgdir;
   struct proc *curproc = myproc();
-  struct proc *p; // for temporarily save
+
+  // If curproc is thread, kill master
+  if(curproc->isthread){
+    //curproc->isthread = 0;
+    //curproc->master = 0; // To prevent kill curproc, set master to 0 firstly and kill master lately
+    //p->killed = 1;
+    //cprintf("kill except %d(%d)\n", curproc->pid, curproc->tid);
+    //killexcept(curproc->pid, curproc);
+  }
 
   begin_op();
 
@@ -93,21 +101,6 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(curproc->name, last, sizeof(curproc->name));
-
-
-  // If curproc is thread, kill master
-  if(curproc->isthread){
-    p = curproc->master;
-    curproc->isthread = 0;
-    curproc->master = 0; // To prevent kill curproc, set master to 0 firstly and kill master lately
-    p->killed = 1;
-    // Wake process from sleep if necessary.
-    //if(curproc->master->state == SLEEPING)
-    //  curproc->master->state = RUNNABLE;
-
-//    curproc->isthread = 0;
-//    curproc->master = 0;
-  }
 
   // Commit to the user image.
   oldpgdir = curproc->pgdir;

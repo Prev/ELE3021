@@ -275,73 +275,65 @@ void
 exit(void)
 {
   struct proc *curproc = myproc();
-  struct proc *p;
+  struct proc *p, *master;
   int fd;
-
-  cprintf("exit call: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
-
+  
   if(curproc == initproc)
     panic("init exiting");
   
-  p = curproc;
   for(fd = 0; fd < NOFILE; fd++){
-    if(p->ofile[fd]){
-      fileclose(p->ofile[fd]);
-      p->ofile[fd] = 0;
+    if(curproc->ofile[fd]){
+      fileclose(curproc->ofile[fd]);
+      curproc->ofile[fd] = 0;
     }
   }
 
   begin_op();
-  iput(p->cwd);
+  iput(curproc->cwd);
   end_op();
-  p->cwd = 0;
+  curproc->cwd = 0;
 
   acquire(&ptable.lock);
+
+  cprintf("exit call: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
 
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
  
-  // Kill slave threads
-  cprintf("Kill slave threads pid=%d\n", curproc->pid);
+  //procdump();
+
+  // Kill slave threads if curproc is master,
+  // Or kill siblings if curproc is slave
+  master = curproc->master ? curproc->master : curproc;
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(curproc->pid != p->pid || curproc == p || p->isthread == 0)
+    if(p == curproc || p->killed || p->state == ZOMBIE)
       continue;
 
-    p->killed = 1;
-    wakeup1(p);
+    if(p->master == master || p == master){
+      cprintf("[%d](%d) is gonna killed\n", p->pid, p->tid);
+      p->killed = 1;
+      //wakeup1(p);
+      p->state = RUNNABLE;
+    }
   }
-  // If curproc is slave thread, kill the master (set flag to kill later)
-  if(curproc->master != 0){
-    cprintf("I wanna kill master: %d(%d)\n", curproc->master->pid, curproc->master->tid);
-    curproc->master->killed = 1;
-    wakeup1(curproc->master);
-  }
-
 
   // Pass abandoned children to init.
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p == curproc)
       continue;
-    
-    if(p->parent == curproc){// || p->master == master){
+    if(p->parent == curproc){
       p->parent = initproc;
       if(p->state == ZOMBIE)
         wakeup1(initproc);
     }
-    
-    // Cleanup the threads of curproc (curproc would be master)
-    if(p->master == curproc){
-      cleanup_thread(p);
+    // Cleaning-up zombie threads would be executed by initproc
+    if(p->master == master && p->state == ZOMBIE){
+      p->parent = initproc;
+      wakeup1(initproc);
     }
   }
-   // Reset data of stride on exit
+  // Reset data of stride on exit
   mlfqs.totalcpu -= curproc->stride.cpushare;
-
-  /*for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->pid != curproc->pid)
-      continue;
-    p->state = ZOMBIE;
-  }*/
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -360,17 +352,24 @@ wait(void)
   
   acquire(&ptable.lock);
   for(;;){
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent != curproc || p->isthread != 1)
+        continue;
+      if(p->state == ZOMBIE){
+        cleanup_thread(p);
+      }
+    }
+
     // Scan through table looking for exited children.
     havekids = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != curproc)
+      if(p->parent != curproc || p->isthread != 0)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
         // Found one.
         cprintf("clean: [%d(%d)] %s  by [%d(%d)] %s\n", p->pid, p->tid, p->name, curproc->pid, curproc->tid, curproc->name);
         
-        //if(p->isthread == 0){
         pid = p->pid;
         kfree(p->kstack);
         p->kstack = 0;
@@ -382,10 +381,6 @@ wait(void)
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;
-        /*}else{
-          cleanup_thread(p);
-          return 0;
-        }*/
       }
     }
 
@@ -453,7 +448,10 @@ mlfq_scheduler(void)
     switchuvm(p);
     p->state = RUNNING;
     p->isyield = 0;
- 
+
+    //if(p->pid==4)
+    //  cprintf("__run [%d(%d)]\n", p->pid, p->tid);
+
     swtch(&(c->scheduler), p->context);
     switchkvm();
 
@@ -719,6 +717,34 @@ kill(int pid)
   //return -1;
   return ret;
 }
+
+// Kill all the process and threads with the given pid
+// except for given process
+void
+killexcept(int pid, struct proc* except)
+{
+  struct proc *p;
+
+  acquire(&ptable.lock);
+  procdump();
+  
+  if(except->killed == 1){
+    // no permission to killexcept [%d(%d)]
+    release(&ptable.lock);
+    return;
+  }
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid && p != except){
+      p->killed = 1;
+      // Wake process from sleep if necessary.
+      if(p->state == SLEEPING)
+        p->state = RUNNABLE;
+    }
+  }
+  release(&ptable.lock);
+}
+
 
 //PAGEBREAK: 36
 // Print a process listing to console.  For debugging.
