@@ -19,20 +19,15 @@ exec(char *path, char **argv)
   pde_t *pgdir, *oldpgdir;
   struct proc *curproc = myproc();
   
-  cprintf("  > exec %s\n", path);
   // If curproc is slave thread, inherit parent and promote to master
   if(curproc->master){
     curproc->parent = curproc->master->parent;
     curproc->isthread = 0;
     curproc->master = 0;
+    //curproc->tid = 0;
   }
-
-  __sync_synchronize();
-
-  // Change pid to -1 whose original pid is same with curproc
-  // Then kill process whose pid is '-1'
   killexcept(curproc->pid, curproc);
-  //kill(999999);
+  
 
   begin_op();
 
@@ -115,7 +110,12 @@ exec(char *path, char **argv)
   curproc->tf->eip = elf.entry;  // main
   curproc->tf->esp = sp;
   switchuvm(curproc);
-  freevm(oldpgdir);
+  
+  if(!curproc->tid)
+    // TODO: fix this
+    freevm(oldpgdir);
+
+  wakeup_except(curproc->pid, curproc);
   return 0;
 
  bad:
@@ -125,5 +125,6 @@ exec(char *path, char **argv)
     iunlockput(ip);
     end_op();
   }
+  wakeup_except(curproc->pid, curproc);
   return -1;
 }

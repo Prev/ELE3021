@@ -278,8 +278,15 @@ exit(void)
   struct proc *p;//, *master;
   int fd, slavecnt;
   
+  // I don't know why its holding.
+  // TODO: fix it
+  if(holding(&ptable.lock))
+    release(&ptable.lock);
+
   if(curproc == initproc)
     panic("init exiting");
+  
+  //cprintf("exit call: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
   
   // If curproc is master process and there is slave alive,
   // wait until all slaves are killed
@@ -292,7 +299,6 @@ exit(void)
         if(p->master == curproc){
           // If slave thread is already zombie, clean-up it
           // Else, kill slave and wait for it
-
           if(p->state == ZOMBIE){
             cleanup_thread(p);
 
@@ -306,7 +312,7 @@ exit(void)
       if(slavecnt == 0){
         release(&ptable.lock);
         break;
-      } 
+      }
       // Wait for slaves to exit.  (See wakeup1 call in proc_exit.)
       sleep(curproc, &ptable.lock);
     }
@@ -325,8 +331,6 @@ exit(void)
   curproc->cwd = 0;
 
   acquire(&ptable.lock);
-
-  //cprintf("exit call: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
 
   if(curproc->isthread == 0){
     // Parent might be sleeping in wait().
@@ -349,6 +353,8 @@ exit(void)
   }
   // Reset data of stride on exit
   mlfqs.totalcpu -= curproc->stride.cpushare;
+
+  //cprintf("exit fin: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -958,7 +964,6 @@ thread_join(thread_t thread, void** retval)
       release(&ptable.lock);
       return -1;
     }
-
     // Wait for slave thread to exit.  (See wakeup1 call in proc_exit.)
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
@@ -994,17 +999,38 @@ void
 killexcept(int pid, struct proc* except)
 {
   struct proc *p;
-  
-  //cprintf("killexcept\n");
+
+  //cprintf("killexcept %d %d\n", except->pid, except->tid);
   acquire(&ptable.lock);
-  //cprintf("killexcept aq\n");
+
+  if(myproc()->killed){
+    release(&ptable.lock);
+    return;
+  }
+  
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if (p->pid == pid && p != except){
-      //p->pid = -1;
       p->killed = 1;
+      p->chan = 0;
+      p->parent = 0; // Cause except proc is inherited its parent
+      p->state = SLEEPING;
+    }
+  }
+  release(&ptable.lock);
+}
+
+void
+wakeup_except(int pid, struct proc* except)
+{
+  struct proc *p;
+  
+  //cprintf("wakeupexcept %d %d\n", except->pid, except->tid);
+  acquire(&ptable.lock);
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if (p->pid == pid && p != except){
       p->state = RUNNABLE;
     }
   }
-  //kill(-1);
   release(&ptable.lock);
 }
