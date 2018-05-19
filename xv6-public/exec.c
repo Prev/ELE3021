@@ -18,15 +18,21 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pde_t *pgdir, *oldpgdir;
   struct proc *curproc = myproc();
-
-  // If curproc is thread, kill master
-  if(curproc->isthread){
-    //curproc->isthread = 0;
-    //curproc->master = 0; // To prevent kill curproc, set master to 0 firstly and kill master lately
-    //p->killed = 1;
-    //cprintf("kill except %d(%d)\n", curproc->pid, curproc->tid);
-    //killexcept(curproc->pid, curproc);
+  
+  cprintf("  > exec %s\n", path);
+  // If curproc is slave thread, inherit parent and promote to master
+  if(curproc->master){
+    curproc->parent = curproc->master->parent;
+    curproc->isthread = 0;
+    curproc->master = 0;
   }
+
+  __sync_synchronize();
+
+  // Change pid to -1 whose original pid is same with curproc
+  // Then kill process whose pid is '-1'
+  killexcept(curproc->pid, curproc);
+  //kill(999999);
 
   begin_op();
 

@@ -264,7 +264,7 @@ fork(void)
 
   release(&ptable.lock);
 
-  cprintf("create: [%d(%d)] %s\n", np->pid, np->tid, np->name);
+  //cprintf("create: [%d(%d)] %s\n", np->pid, np->tid, np->name);
   return pid;
 }
 
@@ -275,11 +275,42 @@ void
 exit(void)
 {
   struct proc *curproc = myproc();
-  struct proc *p, *master;
-  int fd;
+  struct proc *p;//, *master;
+  int fd, slavecnt;
   
   if(curproc == initproc)
     panic("init exiting");
+  
+  // If curproc is master process and there is slave alive,
+  // wait until all slaves are killed
+  if(curproc->isthread == 0){
+    acquire(&ptable.lock);
+
+    for(;;){
+      slavecnt = 0;
+      for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->master == curproc){
+          // If slave thread is already zombie, clean-up it
+          // Else, kill slave and wait for it
+
+          if(p->state == ZOMBIE){
+            cleanup_thread(p);
+
+          }else{
+            slavecnt++;
+            p->killed = 1;
+            wakeup1(p);
+          }
+        }
+      }
+      if(slavecnt == 0){
+        release(&ptable.lock);
+        break;
+      } 
+      // Wait for slaves to exit.  (See wakeup1 call in proc_exit.)
+      sleep(curproc, &ptable.lock);
+    }
+  }
   
   for(fd = 0; fd < NOFILE; fd++){
     if(curproc->ofile[fd]){
@@ -295,41 +326,25 @@ exit(void)
 
   acquire(&ptable.lock);
 
-  cprintf("exit call: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
+  //cprintf("exit call: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
 
-  // Parent might be sleeping in wait().
-  wakeup1(curproc->parent);
+  if(curproc->isthread == 0){
+    // Parent might be sleeping in wait().
+    wakeup1(curproc->parent);
  
-  //procdump();
-
-  // Kill slave threads if curproc is master,
-  // Or kill siblings if curproc is slave
-  master = curproc->master ? curproc->master : curproc;
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p == curproc || p->killed || p->state == ZOMBIE)
-      continue;
-
-    if(p->master == master || p == master){
-      cprintf("[%d](%d) is gonna killed\n", p->pid, p->tid);
-      p->killed = 1;
-      //wakeup1(p);
-      p->state = RUNNABLE;
+    // Pass abandoned children to init.
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent == curproc){
+        p->parent = initproc;
+        if(p->state == ZOMBIE)
+          wakeup1(initproc);
+      }
     }
-  }
-
-  // Pass abandoned children to init.
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p == curproc)
-      continue;
-    if(p->parent == curproc){
-      p->parent = initproc;
-      if(p->state == ZOMBIE)
-        wakeup1(initproc);
-    }
-    // Cleaning-up zombie threads would be executed by initproc
-    if(p->master == master && p->state == ZOMBIE){
-      p->parent = initproc;
-      wakeup1(initproc);
+  }else{
+    // If master is alive
+    if(curproc->master != 0){
+      curproc->master->killed = 1;
+      wakeup1(curproc->master);
     }
   }
   // Reset data of stride on exit
@@ -352,24 +367,14 @@ wait(void)
   
   acquire(&ptable.lock);
   for(;;){
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != curproc || p->isthread != 1)
-        continue;
-      if(p->state == ZOMBIE){
-        cleanup_thread(p);
-      }
-    }
-
     // Scan through table looking for exited children.
     havekids = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != curproc || p->isthread != 0)
+      if(p->parent != curproc)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
         // Found one.
-        cprintf("clean: [%d(%d)] %s  by [%d(%d)] %s\n", p->pid, p->tid, p->name, curproc->pid, curproc->tid, curproc->name);
-        
         pid = p->pid;
         kfree(p->kstack);
         p->kstack = 0;
@@ -699,50 +704,22 @@ int
 kill(int pid)
 {
   struct proc *p;
-  int ret = -1;
-
+  
   acquire(&ptable.lock);
+
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid && p->isthread == 0){
       p->killed = 1;
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING)
         p->state = RUNNABLE;
-      //release(&ptable.lock);
-      //return 0;
-      ret = 0; // There can be more than 1 processes because of thread
+      release(&ptable.lock);
+      return 0;
     }
   }
+
   release(&ptable.lock);
-  //return -1;
-  return ret;
-}
-
-// Kill all the process and threads with the given pid
-// except for given process
-void
-killexcept(int pid, struct proc* except)
-{
-  struct proc *p;
-
-  acquire(&ptable.lock);
-  procdump();
-  
-  if(except->killed == 1){
-    // no permission to killexcept [%d(%d)]
-    release(&ptable.lock);
-    return;
-  }
-
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->pid == pid && p != except){
-      p->killed = 1;
-      // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
-        p->state = RUNNABLE;
-    }
-  }
-  release(&ptable.lock);
+  return -1;
 }
 
 
@@ -789,12 +766,16 @@ reset_strides(void)
 {
   struct proc *p;
 
+  acquire(&ptable.lock);
+
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state != RUNNABLE || p->schedmode != STRIDE_MODE)
       continue;
     p->stride.pass = 0;
   }
   mlfqs.stride.pass = 0;
+
+  release(&ptable.lock);
 }
 
 // Inquires to obtain cpu share (%)
@@ -892,7 +873,7 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
 
   np->state = RUNNABLE;
   
-  cprintf("create_t: [%d(%d)] %s\n", np->pid, np->tid, np->name);
+  //cprintf("create_t: [%d(%d)] %s\n", np->pid, np->tid, np->name);
   release(&ptable.lock);
   
   return 0;
@@ -966,19 +947,6 @@ thread_join(thread_t thread, void** retval)
       if(p->state == ZOMBIE){
         // Found one.
         *retval = p->tmp_retval;
-        
-        /*kfree(p->kstack);
-        p->kstack = 0;
-
-        p->pid = 0;
-        p->parent = 0;
-        p->master = 0;
-        p->name[0] = 0;
-        p->killed = 0;
-        p->state = UNUSED;
-
-        // Deallocate memory area of this thread
-        deallocuvm(p->pgdir, p->sz, p->vabase);*/
         cleanup_thread(p);
 
         release(&ptable.lock);
@@ -1000,9 +968,9 @@ thread_join(thread_t thread, void** retval)
 void
 cleanup_thread(struct proc *p)
 {
-  struct proc *curproc = myproc();
+  //struct proc *curproc = myproc();
 
-  cprintf("cleaned_t: [%d(%d)] %s  by [%d(%d)] %s\n", p->pid, p->tid, p->name, curproc->pid, curproc->tid, curproc->name);
+  //cprintf("cleaned_t: [%d(%d)] %s  by [%d(%d)] %s\n", p->pid, p->tid, p->name, curproc->pid, curproc->tid, curproc->name);
 
   kfree(p->kstack);
   p->kstack = 0;
@@ -1018,3 +986,25 @@ cleanup_thread(struct proc *p)
   deallocuvm(p->pgdir, p->sz, p->vabase);
 }
 
+// Called by `exec()` function.
+// Search process with given pid, and set their pid to new_pid
+// except for one process
+void
+//change_pids(int pid, int new_pid, struct proc* except)
+killexcept(int pid, struct proc* except)
+{
+  struct proc *p;
+  
+  //cprintf("killexcept\n");
+  acquire(&ptable.lock);
+  //cprintf("killexcept aq\n");
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if (p->pid == pid && p != except){
+      //p->pid = -1;
+      p->killed = 1;
+      p->state = RUNNABLE;
+    }
+  }
+  //kill(-1);
+  release(&ptable.lock);
+}
