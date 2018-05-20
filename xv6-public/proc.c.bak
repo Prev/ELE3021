@@ -32,6 +32,18 @@ extern void trapret(void);
 static void wakeup1(void *chan);
 void cleanup_thread(struct proc*);
 
+
+char* lastlock;
+void
+acquire2(struct spinlock *lk, char* whose)
+{
+  if(holding(lk))
+    cprintf("last lock: %s, and now: %s\n", lastlock, whose);
+  acquire(lk);
+  lastlock = whose;
+}
+
+
 void
 pinit(void)
 {
@@ -88,7 +100,7 @@ allocproc(void)
   struct proc *p;
   char *sp;
 
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "allocproc");
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
@@ -168,7 +180,7 @@ userinit(void)
   // run this process. the acquire forces the above
   // writes to be visible, and the lock is also needed
   // because the assignment might not be atomic.
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "userinit");
 
   p->state = RUNNABLE;
 
@@ -258,7 +270,7 @@ fork(void)
 
   pid = np->pid;
 
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "fork");
 
   np->state = RUNNABLE;
 
@@ -278,6 +290,11 @@ exit(void)
   struct proc *p;//, *master;
   int fd, slavecnt;
   
+  // I don't know why its holding.
+  // TODO: fix it
+  //if(holding(&ptable.lock))
+  //  release(&ptable.lock);
+
   if(curproc == initproc)
     panic("init exiting");
   
@@ -286,7 +303,7 @@ exit(void)
   // If curproc is master process and there is slave alive,
   // wait until all slaves are killed
   if(curproc->isthread == 0){
-    acquire(&ptable.lock);
+    acquire2(&ptable.lock, "exit(1)");
 
     for(;;){
       slavecnt = 0;
@@ -325,7 +342,7 @@ exit(void)
   end_op();
   curproc->cwd = 0;
 
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "exit(2)");
 
   if(curproc->isthread == 0){
     // Parent might be sleeping in wait().
@@ -366,7 +383,7 @@ wait(void)
   int havekids, pid;
   struct proc *curproc = myproc();
   
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "wait");
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
@@ -455,8 +472,8 @@ mlfq_scheduler(void)
     p->state = RUNNING;
     p->isyield = 0;
 
-    //if(p->pid==4)
-    //  cprintf("__run [%d(%d)]\n", p->pid, p->tid);
+    if(p->pid==4)
+      cprintf("__run [%d(%d)]\n", p->pid, p->tid);
 
     swtch(&(c->scheduler), p->context);
     switchkvm();
@@ -525,7 +542,7 @@ scheduler(void)
     sti();
 
     // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
+    acquire2(&ptable.lock, "scheduler");
   
     sp = 0; // Selected proc
     double minpass = mlfqs.stride.pass;
@@ -602,7 +619,7 @@ sched(void)
 void
 yield(void)
 {
-  acquire(&ptable.lock);  //DOC: yieldlock
+  acquire2(&ptable.lock, "yield");  //DOC: yieldlock
   myproc()->state = RUNNABLE;
   sched();
   release(&ptable.lock);
@@ -657,7 +674,7 @@ sleep(void *chan, struct spinlock *lk)
   // (wakeup runs with ptable.lock locked),
   // so it's okay to release lk.
   if(lk != &ptable.lock){  //DOC: sleeplock0
-    acquire(&ptable.lock);  //DOC: sleeplock1
+    acquire2(&ptable.lock, "sleep");  //DOC: sleeplock1
     release(lk);
   }
   // Go to sleep.
@@ -693,7 +710,7 @@ wakeup1(void *chan)
 void
 wakeup(void *chan)
 {
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "wakeup");
   wakeup1(chan);
   release(&ptable.lock);
 }
@@ -706,7 +723,7 @@ kill(int pid)
 {
   struct proc *p;
   
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "kill");
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid && p->isthread == 0){
@@ -781,7 +798,7 @@ set_cpu_share(int cpu_share)
 {
   struct proc *p = myproc();
 
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "set_cpu_share");
 
   if(mlfqs.totalcpu + cpu_share > 100 - MLFQ_MIN_PORTION){
     release(&ptable.lock);
@@ -842,7 +859,7 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
   
   // Copy states
   *np->tf = *master->tf;
-//  np->schedmode = master->schedmode;
+  np->schedmode = master->schedmode;
 
   for(i = 0; i < NOFILE; i++)
     if(master->ofile[i])
@@ -866,7 +883,7 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
   *thread = np->tid;
 
   // Make runnable
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "thread_create");
 
   np->state = RUNNABLE;
   
@@ -898,7 +915,7 @@ thread_exit(void* retval)
   end_op();
   curproc->cwd = 0;
 
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "thread_exit");
   
   // Save retval temporarily
   curproc->tmp_retval = retval;
@@ -930,7 +947,7 @@ thread_join(thread_t thread, void** retval)
     return -1;
   }
 
-  acquire(&ptable.lock);
+  acquire2(&ptable.lock, "thread_join");
   for(;;){
     // Scan through table looking for exited slave threads.
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
@@ -957,8 +974,11 @@ thread_join(thread_t thread, void** retval)
       release(&ptable.lock);
       return -1;
     }
+    cprintf("thread join wait\n");
     // Wait for slave thread to exit.  (See wakeup1 call in proc_exit.)
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
+
+    cprintf("thread join wakeup\n");
   }
 }
 
@@ -985,15 +1005,16 @@ cleanup_thread(struct proc *p)
 }
 
 // Called by `exec()` function.
-// Search process with given pid, set killed 1 to
-// all processes(and threads) that's pid is given pid,
-// except for one process.
+// Search process with given pid, and set their pid to new_pid
+// except for one process
 void
+//change_pids(int pid, int new_pid, struct proc* except)
 killexcept(int pid, struct proc* except)
 {
   struct proc *p;
 
-  acquire(&ptable.lock);
+  //cprintf("killexcept %d %d\n", except->pid, except->tid);
+  acquire2(&ptable.lock, "killexcept");
 
   if(myproc()->killed){
     release(&ptable.lock);
@@ -1004,40 +1025,25 @@ killexcept(int pid, struct proc* except)
     if (p->pid == pid && p != except){
       p->killed = 1;
       p->chan = 0;
+      p->parent = 0; // Cause except proc is inherited its parent
       p->state = SLEEPING;
     }
   }
   release(&ptable.lock);
 }
 
-
-/// Called by `exec()` function.
-// Search process with given pid, and wake up
-// all processes(and threads) that's pid is given pid,
-// except for one process. They might call exit() this time
 void
 wakeup_except(int pid, struct proc* except)
 {
   struct proc *p;
-  int havekids;
-
-  acquire(&ptable.lock);
-  havekids = 0;
+  
+  //cprintf("wakeupexcept %d %d\n", except->pid, except->tid);
+  acquire2(&ptable.lock, "wakeup_except");
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if (p->pid == pid && p != except){
       p->state = RUNNABLE;
-
-      // Process `except` inherits original process,
-      // so collector of this process should be `except` proc
-      if(p->parent){
-        p->parent = except;
-        havekids = 1;
-      }
     }
   }
   release(&ptable.lock);
-
-  if(havekids)
-    wait();
 }
