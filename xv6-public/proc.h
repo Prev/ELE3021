@@ -64,7 +64,7 @@ struct mlfqdata {
 struct stridedata {
   double pass;               // Pass of stride algorithm
   double stride;             // Stride of stride algorithm
-  int cpushare;              // Allocated percentate of cpu (set by cpu_share function)
+  int cpu_share;              // Allocated percentate of cpu (set by cpu_share function)
 };
 
 // Per-process state

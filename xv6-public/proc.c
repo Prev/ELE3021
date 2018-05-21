@@ -339,6 +339,9 @@ exit(void)
           wakeup1(initproc);
       }
     }
+    // Reset data of stride on exit only proc is master
+    mlfqs.totalcpu -= curproc->stride.cpu_share;
+
   }else{
     // If master is alive
     if(curproc->master != 0){
@@ -346,10 +349,6 @@ exit(void)
       wakeup1(curproc->master);
     }
   }
-  // Reset data of stride on exit
-  mlfqs.totalcpu -= curproc->stride.cpushare;
-
-  //cprintf("exit fin: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -455,9 +454,6 @@ mlfq_scheduler(void)
     p->state = RUNNING;
     p->isyield = 0;
 
-    //if(p->pid==4)
-    //  cprintf("__run [%d(%d)]\n", p->pid, p->tid);
-
     swtch(&(c->scheduler), p->context);
     switchkvm();
 
@@ -502,6 +498,25 @@ mlfq_scheduler(void)
   // then go back to schedule function,
   // and compare stride again
   mlfqs.stride.pass += (double)(100l / (double)(100 - mlfqs.totalcpu)); // Stride of MLFQ;
+}
+
+// Get current stride of given process.
+// The ptable lock must be held.
+double
+getstride(struct proc* sp)
+{
+  struct proc *p;
+  int numthreads = 0;
+
+  if(sp->schedmode != STRIDE_MODE)
+    panic("getstride");
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == sp->pid)
+      numthreads++;
+  }
+
+  return 100l / (double)sp->stride.cpu_share / numthreads;
 }
 
 //PAGEBREAK: 42
@@ -564,7 +579,8 @@ scheduler(void)
       swtch(&(c->scheduler), p->context);
       switchkvm();
       
-      p->stride.pass += p->stride.stride;
+      p->stride.pass += getstride(p);
+      //p->stride.pass += p->stride.stride;
       c->proc = 0;
     }
 
@@ -761,7 +777,8 @@ procdump(void)
   }
 }
 
-// Reset pass of all processes using stride scheduling
+// Reset pass of all processes using stride scheduling.
+// The ptable lock must be held.
 void
 reset_strides(void)
 {
@@ -779,7 +796,9 @@ reset_strides(void)
 int
 set_cpu_share(int cpu_share)
 {
-  struct proc *p = myproc();
+  //struct proc *p = myproc()
+  struct proc *curproc = myproc();
+  struct proc *p;
 
   acquire(&ptable.lock);
 
@@ -789,10 +808,14 @@ set_cpu_share(int cpu_share)
   }
 
   mlfqs.totalcpu += cpu_share;
-   
-  p->schedmode = STRIDE_MODE;
-  p->stride.cpushare = cpu_share;
-  p->stride.stride = 100l / (double)cpu_share;
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == curproc->pid){
+      p->schedmode = STRIDE_MODE;
+      p->stride.cpu_share = cpu_share;
+      //p->stride.stride = 100l / (double)cpu_share;
+    }
+  }
  
   reset_strides();
 
@@ -842,7 +865,12 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
   
   // Copy states
   *np->tf = *master->tf;
-//  np->schedmode = master->schedmode;
+  np->schedmode = master->schedmode;
+
+  if(np->schedmode == STRIDE_MODE){
+    np->stride.cpu_share = master->stride.cpu_share;
+    reset_strides();
+  }
 
   for(i = 0; i < NOFILE; i++)
     if(master->ofile[i])
@@ -870,7 +898,6 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
 
   np->state = RUNNABLE;
   
-  //cprintf("create_t: [%d(%d)] %s\n", np->pid, np->tid, np->name);
   release(&ptable.lock);
   
   return 0;
@@ -905,9 +932,6 @@ thread_exit(void* retval)
 
   // Master process might be sleeping in wait().
   wakeup1(curproc->master);
-
-  // Reset data of stride on exit
-  mlfqs.totalcpu -= curproc->stride.cpushare;
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -966,10 +990,6 @@ thread_join(thread_t thread, void** retval)
 void
 cleanup_thread(struct proc *p)
 {
-  //struct proc *curproc = myproc();
-
-  //cprintf("cleaned_t: [%d(%d)] %s  by [%d(%d)] %s\n", p->pid, p->tid, p->name, curproc->pid, curproc->tid, curproc->name);
-
   kfree(p->kstack);
   p->kstack = 0;
 
