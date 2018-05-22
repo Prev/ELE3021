@@ -117,6 +117,7 @@ test3()
 
   }else if(pid > 0){
     sleep(10);
+    wait();
     exit();
   }
 }
@@ -127,8 +128,15 @@ test3()
 int
 main(int argc, char *argv[])
 {
+  printf(1, "===========Test1===========\n");
   test1();
-  //test3();
+  
+  printf(1, "===========Test2===========\n");
+  test2();
+  
+  printf(1, "===========Test3===========\n");
+  test3();
+
   printf(1, "All tests are done\n");
   
   exit();
