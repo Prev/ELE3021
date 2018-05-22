@@ -273,9 +273,6 @@ stressthreadmain(void *arg)
 int
 stresstest(void)
 {
-  printf(1, "Skip stress test\n");
-  return 0;
-
   const int nstress = 35000;
   thread_t threads[NUM_THREAD];
   int i, n;
@@ -397,16 +394,19 @@ sbrkthreadmain(void *arg)
   char *c;
   oldbrk = sbrk(1000);
   end = oldbrk + 1000;
+
   for (c = oldbrk; c < end; c++){
     *c = tid+1;
   }
   sleep(1);
+
   for (c = oldbrk; c < end; c++){
     if (*c != tid+1){
       printf(1, "panic at sbrkthreadmain\n");
       exit();
     }
   }
+
   thread_exit(0);
 }
 

@@ -127,8 +127,8 @@ test3()
 int
 main(int argc, char *argv[])
 {
-  //test1();
-  test3();
+  test1();
+  //test3();
   printf(1, "All tests are done\n");
   
   exit();

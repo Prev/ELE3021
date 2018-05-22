@@ -132,7 +132,8 @@ found:
   // Init data of stride & mlfq
   memset(&p->stride, 0, sizeof p->stride);
   memset(&p->mlfq, 0, sizeof p->mlfq);
-  //p->callcnt = 0;
+  
+  memset(&p->blankvm, 0, sizeof p->blankvm);
 
   return p;
 }
@@ -176,29 +177,37 @@ userinit(void)
 }
 
 // Grow current process's memory by n bytes.
-// Return 0 on success, -1 on failure.
+// Return old size on success, -1 on failure.
 int
 growproc(int n)
 {
-  uint sz;
+  uint sz, oldsz;
   struct proc *curproc = myproc();
   struct proc *p;
 
+  acquire(&ptable.lock);
+
   // Grow up master's size if current process is thread
-  //p = (curproc->isthread == 1) ? curproc->master : curproc;
-  p = curproc;
+  p = (curproc->isthread == 1) ? curproc->master : curproc;
 
   sz = p->sz;
+  oldsz = sz;
   if(n > 0){
-    if((sz = allocuvm(p->pgdir, sz, sz + n)) == 0)
-      return -1;
+    if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
+      goto bad;
   } else if(n < 0){
-    if((sz = deallocuvm(p->pgdir, sz, sz + n)) == 0)
-      return -1;
+    if((sz = deallocuvm(curproc->pgdir, sz, sz + n)) == 0)
+      goto bad;
   }
   p->sz = sz;
+  release(&ptable.lock);
+
   switchuvm(curproc);
-  return 0;
+  return oldsz;
+
+bad:
+  release(&ptable.lock);
+  return -1;
 }
 
 // Create a new process copying p as the parent.
@@ -280,8 +289,6 @@ exit(void)
   
   if(curproc == initproc)
     panic("init exiting");
-  
-  //cprintf("exit call: [%d(%d)] %s\n", curproc->pid, curproc->tid, curproc->name);
   
   // If curproc is master process and there is slave alive,
   // wait until all slaves are killed
@@ -580,7 +587,6 @@ scheduler(void)
       switchkvm();
       
       p->stride.pass += getstride(p);
-      //p->stride.pass += p->stride.stride;
       c->proc = 0;
     }
 
@@ -796,7 +802,6 @@ reset_strides(void)
 int
 set_cpu_share(int cpu_share)
 {
-  //struct proc *p = myproc()
   struct proc *curproc = myproc();
   struct proc *p;
 
@@ -813,10 +818,10 @@ set_cpu_share(int cpu_share)
     if(p->pid == curproc->pid){
       p->schedmode = STRIDE_MODE;
       p->stride.cpu_share = cpu_share;
-      //p->stride.stride = 100l / (double)cpu_share;
+      // stride.stride is not set in here.
+      // It is calculated in `getstride` function every time when it is used.
     }
   }
- 
   reset_strides();
 
   release(&ptable.lock);
@@ -850,8 +855,24 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
 
   // For usefulness of cleaning up on thread-terminated,
   // scope of address (means base address) is determined by its tid.
+  
+  acquire(&ptable.lock);
+  
   pgdir = master->pgdir;
-  vabase = master->sz + (uint)(10 * PGSIZE * np->tid); // Base of virtual address
+  //vabase = master->sz + (uint)(10 * PGSIZE * np->tid); // Base of virtual address
+  
+  // If there is blank memory on process, use it.
+  // Else, grow vm and give new thread memory located at the top
+  if(master->blankvm.size){
+    vabase = master->blankvm.data[--master->blankvm.size]; // Pop on stack
+
+  }else{
+    vabase = master->sz;
+    master->sz += 2*PGSIZE;
+  }
+
+  //cprintf("[%d(%d)]: %x ~ %x\t", np->pid, np->tid, vabase, vabase + 2*PGSIZE);
+  //cprintf("[%d] sz: %x\n", master->pid, master->sz);
 
   // Allocate two pages for current thread.
   // Make the first inaccessible. Use the second as the user stack for new thread
@@ -860,9 +881,11 @@ thread_create(thread_t* thread, void* (*start_routine)(void *), void* arg)
     return -1;
   }
 
-  clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
+  //clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
   //vabase += PGSIZE;
-  
+ 
+  release(&ptable.lock);
+
   // Copy states
   *np->tf = *master->tf;
   np->schedmode = master->schedmode;
@@ -986,12 +1009,17 @@ thread_join(thread_t thread, void** retval)
   }
 }
 
-// Clean up the thread
+// Clean up resources of the thread.
+// Announce to master that area used by this thread
+// is currently blank so other could use it.
+// The ptable lock must be held.
 void
 cleanup_thread(struct proc *p)
 {
   kfree(p->kstack);
   p->kstack = 0;
+
+  p->master->blankvm.data[p->master->blankvm.size++] = p->vabase;
 
   p->pid = 0;
   p->parent = 0;
@@ -1002,6 +1030,7 @@ cleanup_thread(struct proc *p)
 
   // Deallocate memory area of this thread
   deallocuvm(p->pgdir, p->sz, p->vabase);
+
 }
 
 // Called by `exec()` function.
