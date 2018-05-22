@@ -64,7 +64,12 @@ struct mlfqdata {
 struct stridedata {
   double pass;               // Pass of stride algorithm
   double stride;             // Stride of stride algorithm
-  int cpushare;              // Allocated percentate of cpu (set by cpu_share function)
+  int cpu_share;              // Allocated percentate of cpu (set by cpu_share function)
+};
+
+struct blankvm {
+  uint data[NPROC];
+  int size;
 };
 
 // Per-process state
@@ -88,8 +93,12 @@ struct proc {
   struct stridedata stride;    // Stride data structure to run as stride mode
   int isyield;                 // When process call `yield()` to give up it's CPU, is variable set to 1
 
-//  int callcnt;
-//  int starttick;
+  int isthread;                // '1' if this is pthread, 0 otherwise
+  int tid;                     // Thread id
+  struct proc *master;         // Master thread of this process
+  void* tmp_retval;            // Temporally saved return-value of thread
+  uint vabase;                 // Base of virtual address (Base of normal process is 0, but slave thread has special base addr)
+  struct blankvm blankvm;
 };
 
 

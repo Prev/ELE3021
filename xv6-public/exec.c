@@ -18,6 +18,16 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pde_t *pgdir, *oldpgdir;
   struct proc *curproc = myproc();
+  
+  // If curproc is slave thread, inherit parent and promote to master
+  if(curproc->master){
+    curproc->parent = curproc->master->parent;
+    curproc->isthread = 0;
+    curproc->master = 0;
+    //curproc->tid = 0;
+  }
+  killexcept(curproc->pid, curproc);
+  
 
   begin_op();
 
@@ -100,7 +110,12 @@ exec(char *path, char **argv)
   curproc->tf->eip = elf.entry;  // main
   curproc->tf->esp = sp;
   switchuvm(curproc);
-  freevm(oldpgdir);
+  
+  if(!curproc->tid)
+    // TODO: fix this
+    freevm(oldpgdir);
+
+  wakeup_except(curproc->pid, curproc);
   return 0;
 
  bad:
@@ -110,5 +125,6 @@ exec(char *path, char **argv)
     iunlockput(ip);
     end_op();
   }
+  wakeup_except(curproc->pid, curproc);
   return -1;
 }
