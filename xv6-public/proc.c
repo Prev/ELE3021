@@ -270,7 +270,7 @@ void
 exit(void)
 {
   struct proc *curproc = myproc();
-  struct proc *p;//, *master;
+  struct proc *p;
   int fd, slavecnt;
   
   if(curproc == initproc)
@@ -324,14 +324,6 @@ exit(void)
     // Parent might be sleeping in wait().
     wakeup1(curproc->parent);
  
-    // Pass abandoned children to init.
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent == curproc){
-        p->parent = initproc;
-        if(p->state == ZOMBIE)
-          wakeup1(initproc);
-      }
-    }
     // Reset data of stride on exit only proc is master
     mlfqs.totalcpu -= curproc->stride.cpu_share;
 
@@ -342,6 +334,15 @@ exit(void)
       wakeup1(curproc->master);
     }
   }
+
+  // Pass abandoned children to init.
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent == curproc){
+        p->parent = initproc;
+        if(p->state == ZOMBIE)
+          wakeup1(initproc);
+      }
+    }
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
@@ -1012,7 +1013,7 @@ cleanup_thread(struct proc *p)
 // all processes(and threads) that's pid is given pid,
 // except for one process.
 void
-killexcept(int pid, struct proc* except)
+kill_except(int pid, struct proc* except)
 {
   struct proc *p;
 

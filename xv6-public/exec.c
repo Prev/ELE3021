@@ -27,7 +27,7 @@ exec(char *path, char **argv)
     oldtid = curproc->tid;
     curproc->tid = 0;
   }
-  killexcept(curproc->pid, curproc);
+  kill_except(curproc->pid, curproc);
   
 
   begin_op();
