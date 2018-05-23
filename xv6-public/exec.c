@@ -18,15 +18,16 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pde_t *pgdir, *oldpgdir;
   struct proc *curproc = myproc();
-  
+  int oldtid = 0;
+
   // If curproc is slave thread, inherit parent and promote to master
   if(curproc->master){
     curproc->parent = curproc->master->parent;
-    curproc->isthread = 0;
     curproc->master = 0;
-    //curproc->tid = 0;
+    oldtid = curproc->tid;
+    curproc->tid = 0;
   }
-  killexcept(curproc->pid, curproc);
+  kill_except(curproc->pid, curproc);
   
 
   begin_op();
@@ -111,8 +112,7 @@ exec(char *path, char **argv)
   curproc->tf->esp = sp;
   switchuvm(curproc);
   
-  if(!curproc->tid)
-    // TODO: fix this
+  if(oldtid == 0)
     freevm(oldpgdir);
 
   wakeup_except(curproc->pid, curproc);

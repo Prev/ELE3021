@@ -67,6 +67,8 @@ struct stridedata {
   int cpu_share;              // Allocated percentate of cpu (set by cpu_share function)
 };
 
+// When thread is cleaned up, its memeory spaces is saved to blankvm of master's
+// so that new thread could use memory space in blankvm, not by growing sz of master
 struct blankvm {
   uint data[NPROC];
   int size;
@@ -93,12 +95,12 @@ struct proc {
   struct stridedata stride;    // Stride data structure to run as stride mode
   int isyield;                 // When process call `yield()` to give up it's CPU, is variable set to 1
 
-  int isthread;                // '1' if this is pthread, 0 otherwise
-  int tid;                     // Thread id
+  int tid;                     // Thread id (0 if this is not slave thread)
   struct proc *master;         // Master thread of this process
   void* tmp_retval;            // Temporally saved return-value of thread
   uint vabase;                 // Base of virtual address (Base of normal process is 0, but slave thread has special base addr)
-  struct blankvm blankvm;
+  struct blankvm blankvm;      // Currently blanks of memory space of "master" thread's (slave do NOT use this)
+                            
 };
 
 

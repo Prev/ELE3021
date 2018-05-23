@@ -125,7 +125,7 @@ int             set_cpu_share(int);
 int             thread_create(thread_t* thread, void* (*start_routine)(void*), void* arg);           
 void            thread_exit(void* retval);
 int             thread_join(thread_t thread, void** retval);
-void            killexcept(int, struct proc*);
+void            kill_except(int, struct proc*);
 void            wakeup_except(int, struct proc*);
 
 // swtch.S
@@ -188,7 +188,6 @@ void            freevm(pde_t*);
 void            inituvm(pde_t*, char*, uint);
 int             loaduvm(pde_t*, char*, struct inode*, uint, uint);
 pde_t*          copyuvm(pde_t*, uint);
-pde_t*          copyuvmip(pde_t*, uint);
 void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
