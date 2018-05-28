@@ -397,7 +397,84 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+  if(bn < NDINDIRECT){
+    // Load double indirect block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT+1]) == 0)
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn / NINDIRECT]) == 0){
+      a[bn / NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn % NINDIRECT]) == 0){
+      a[bn % NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    return addr;
+  }
+
+  if(bn < NTINDIRECT){
+    // Load triple indirect block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT+2]) == 0)
+      ip->addrs[NDIRECT+2] = addr = balloc(ip->dev);
+
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn / NDINDIRECT]) == 0){
+      a[bn / NDINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[(bn % NDINDIRECT) / NINDIRECT]) == 0){
+      a[(bn % NDINDIRECT) / NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn % NINDIRECT]) == 0){
+      a[bn % NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    return addr;
+  }
   panic("bmap: out of range");
+}
+
+// Truncate inode recursively
+// for double or triple indirect node
+static void
+itrunc_recur(struct inode *ip, uint addr, int curlev, int maxlev)
+{
+  int i;
+  struct buf *bp;
+  uint *a;
+
+  bp = bread(ip->dev, addr);
+  a = (uint*)bp->data;
+
+  for(i = 0; i < NINDIRECT; i++){
+    if(a[i]){
+      if(curlev==maxlev)
+        bfree(ip->dev, a[i]);
+      else
+        itrunc_recur(ip, a[i], curlev+1, maxlev);
+    }
+  }
+
+  brelse(bp);
+  bfree(ip->dev, addr);
 }
 
 // Truncate inode (discard contents).
@@ -408,9 +485,9 @@ bmap(struct inode *ip, uint bn)
 static void
 itrunc(struct inode *ip)
 {
-  int i, j;
-  struct buf *bp;
-  uint *a;
+  int i;//, j;
+  //struct buf *bp;
+  //uint *a;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -420,7 +497,7 @@ itrunc(struct inode *ip)
   }
 
   if(ip->addrs[NDIRECT]){
-    bp = bread(ip->dev, ip->addrs[NDIRECT]);
+    /*bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
     for(j = 0; j < NINDIRECT; j++){
       if(a[j])
@@ -428,7 +505,16 @@ itrunc(struct inode *ip)
     }
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
-    ip->addrs[NDIRECT] = 0;
+    ip->addrs[NDIRECT] = 0;*/
+    itrunc_recur(ip, ip->addrs[NDIRECT], 1, 1);
+  }
+
+  if(ip->addrs[NDIRECT+1]){
+    itrunc_recur(ip, ip->addrs[NDIRECT+1], 1, 2);
+  }
+
+  if(ip->addrs[NDIRECT+2]){
+    itrunc_recur(ip, ip->addrs[NDIRECT+2], 1, 3);
   }
 
   ip->size = 0;
