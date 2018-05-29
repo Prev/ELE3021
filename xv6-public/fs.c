@@ -485,9 +485,7 @@ itrunc_recur(struct inode *ip, uint addr, int curlev, int maxlev)
 static void
 itrunc(struct inode *ip)
 {
-  int i;//, j;
-  //struct buf *bp;
-  //uint *a;
+  int i;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -495,27 +493,19 @@ itrunc(struct inode *ip)
       ip->addrs[i] = 0;
     }
   }
-
-  if(ip->addrs[NDIRECT]){
-    /*bp = bread(ip->dev, ip->addrs[NDIRECT]);
-    a = (uint*)bp->data;
-    for(j = 0; j < NINDIRECT; j++){
-      if(a[j])
-        bfree(ip->dev, a[j]);
-    }
-    brelse(bp);
-    bfree(ip->dev, ip->addrs[NDIRECT]);
-    ip->addrs[NDIRECT] = 0;*/
+  
+  // Single indirect blocks
+  if(ip->addrs[NDIRECT])
     itrunc_recur(ip, ip->addrs[NDIRECT], 1, 1);
-  }
-
-  if(ip->addrs[NDIRECT+1]){
+ 
+  // Double indirect blocks
+  if(ip->addrs[NDIRECT+1])
     itrunc_recur(ip, ip->addrs[NDIRECT+1], 1, 2);
-  }
-
-  if(ip->addrs[NDIRECT+2]){
+  
+  // Triple indirect blocks
+  if(ip->addrs[NDIRECT+2])
     itrunc_recur(ip, ip->addrs[NDIRECT+2], 1, 3);
-  }
+  
 
   ip->size = 0;
   iupdate(ip);
