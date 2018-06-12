@@ -29,15 +29,14 @@ SYSCALL(getpid)
 SYSCALL(sbrk)
 SYSCALL(sleep)
 SYSCALL(uptime)
-
 SYSCALL(myfunction)
 SYSCALL(getppid)
-
 SYSCALL(yield)
 SYSCALL(getlev)
 SYSCALL(set_cpu_share)
-
 SYSCALL(thread_create)
 SYSCALL(thread_exit)
 SYSCALL(thread_join)
 SYSCALL(gettid)
+SYSCALL(pread)
+SYSCALL(pwrite)

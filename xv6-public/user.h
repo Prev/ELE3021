@@ -32,6 +32,8 @@ int thread_create(thread_t*, void*, void*);
 void thread_exit(void*)  __attribute__((noreturn));
 int thread_join(thread_t, void**);
 int gettid(void);
+int pwrite(int, void*, int, int);
+int pread(int, void*, int, int);
 
 // ulib.c
 int stat(char*, struct stat*);
