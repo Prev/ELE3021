@@ -587,6 +587,47 @@ writei(struct inode *ip, char *src, uint off, uint n)
   return n;
 }
 
+// Write data to inode with auto scaling (tolerant from offset over than sz)
+// Caller must hold ip->lock.
+int
+writei2(struct inode *ip, char *src, uint off, uint n)
+{
+  uint tot, m;
+  struct buf *bp;
+
+  if(ip->type == T_DEV){
+    if(ip->major < 0 || ip->major >= NDEV || !devsw[ip->major].write)
+      return -1;
+    return devsw[ip->major].write(ip, src, n);
+  }
+
+  if(off + n < off)
+    return -1;
+  if(off + n > MAXFILE*BSIZE)
+    return -1;
+
+  // Pre-update inode
+  if(off + n > ip->size){
+    ip->size = off + n;
+    iupdate(ip);
+  }
+
+  for(tot=0; tot<n; tot+=m, off+=m, src+=m){
+    bp = bread(ip->dev, bmap(ip, off/BSIZE));
+    m = min(n - tot, BSIZE - off%BSIZE);
+    memmove(bp->data + off%BSIZE, src, m);
+    log_write(bp);
+    brelse(bp);
+  }
+
+  /*if(n > 0 && off > ip->size){
+    ip->size = off;
+    iupdate(ip);
+  }*/
+  return n;
+}
+
+
 //PAGEBREAK!
 // Directories
 

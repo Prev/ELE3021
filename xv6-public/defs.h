@@ -33,6 +33,8 @@ void            fileinit(void);
 int             fileread(struct file*, char*, int n);
 int             filestat(struct file*, struct stat*);
 int             filewrite(struct file*, char*, int n);
+int             pfilewrite(struct file*, char*, int, int);
+int             pfileread(struct file*, char*, int, int);
 
 // fs.c
 void            readsb(int dev, struct superblock *sb);
@@ -52,6 +54,7 @@ struct inode*   nameiparent(char*, char*);
 int             readi(struct inode*, char*, uint, uint);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, char*, uint, uint);
+int             writei2(struct inode*, char*, uint, uint);
 
 // ide.c
 void            ideinit(void);
