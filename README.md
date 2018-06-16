@@ -10,14 +10,14 @@ Shell program that operates below.
 2. Shell creates a child process.
 3. Child process execute the command.
 
-[See More](../../project1-shell)
+[See More](../../wiki/project1-shell)
 
 
 ## Project 02. MLFQ and Stride scheduling
 
 Design a new scheduler with MLFQ and Stride.
 
-[See More](../../project2-scheduling)
+[See More](../../wiki/project2-scheduling)
 
 
 
@@ -25,16 +25,16 @@ Design a new scheduler with MLFQ and Stride.
 
 Create LWP similar to pthread for xv6
 
-[See More](../../project3-lwp)
+[See More](../../wiki/project3-lwp)
 
 
 ## Project 04. FileSystem
 
 **Milestone 1**: Expand the maximum size of a file
 
-[See More](../../project4-filesystem)
+[See More](../../wiki/project4-filesystem)
 
 
 **Milestone 2**: Implement the pread, pwrite system call (Positional read & write).
 
-[See More](../../project4-filesystem-milestone2)
+[See More](../../wiki/project4-filesystem-milestone2)
